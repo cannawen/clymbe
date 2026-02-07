@@ -1,0 +1,10 @@
+{
+  "unstable": ["kv"],
+  "imports": {
+    "@oak/oak": "jsr:@oak/oak@^17.2.0",
+    "web-push": "npm:web-push@^3.6.7"
+  },
+  "tasks": {
+    "start": "deno run --allow-net --allow-env --allow-read=./static main.ts"
+  }
+}

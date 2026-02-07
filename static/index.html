@@ -1,0 +1,956 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>clymbe</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#1a1a3e">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="clymbe">
+    <link rel="apple-touch-icon" href="/icon-192.png">
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      /* -- dark theme (default) -- */
+      :root[data-theme="dark"] {
+        --bg: linear-gradient(160deg, #0f0f2d 0%, #1a1a3e 40%, #1e1240 100%);
+        --text: #f0f0f8;
+        --text-muted: #a0a0c0;
+        --text-dim: #7070a0;
+        --heading: #fff;
+        --card-bg: rgba(255, 255, 255, 0.06);
+        --card-border: rgba(255, 255, 255, 0.1);
+        --card-shadow: rgba(0, 0, 0, 0.3);
+        --input-bg: rgba(255, 255, 255, 0.08);
+        --input-border: rgba(255, 255, 255, 0.15);
+        --btn-primary-bg: #f28c5a;
+        --btn-primary-hover: #f5a070;
+        --btn-primary-text: #0f0f2d;
+        --btn-sec-bg: rgba(255, 255, 255, 0.08);
+        --btn-sec-border: rgba(255, 255, 255, 0.15);
+        --btn-sec-text: #f0f0f8;
+        --btn-sec-hover: rgba(255, 255, 255, 0.14);
+        --status-bg: rgba(0, 0, 0, 0.25);
+        --status-border: rgba(255, 255, 255, 0.1);
+        --status-text: #a0a0c0;
+        --badge-bg: rgba(139, 92, 246, 0.15);
+        --badge-border: rgba(139, 92, 246, 0.4);
+        --badge-text: #c4b5fd;
+        --accent: #5ce0d8;
+        --accent-ring: rgba(92, 224, 216, 0.25);
+        --check-accent: #5ce0d8;
+        --people-title: #d0d0e8;
+        --person-bg: rgba(255, 255, 255, 0.04);
+        --person-border: rgba(255, 255, 255, 0.08);
+        --person-name: #f0f0f8;
+        --message-color: #5ce0d8;
+        --toggle-bg: rgba(255, 255, 255, 0.08);
+        --toggle-border: rgba(255, 255, 255, 0.15);
+        --toggle-text: #f0f0f8;
+      }
+
+      /* -- light theme -- */
+      :root[data-theme="light"] {
+        --bg: linear-gradient(160deg, #fef5f0 0%, #f5eeff 40%, #fdf0f6 100%);
+        --text: #2d1f3d;
+        --text-muted: #6b5a7a;
+        --text-dim: #9485a5;
+        --heading: #1e1240;
+        --card-bg: rgba(255, 255, 255, 0.75);
+        --card-border: rgba(139, 92, 246, 0.15);
+        --card-shadow: rgba(139, 92, 246, 0.08);
+        --input-bg: rgba(255, 255, 255, 0.8);
+        --input-border: rgba(139, 92, 246, 0.2);
+        --btn-primary-bg: #e87a48;
+        --btn-primary-hover: #f28c5a;
+        --btn-primary-text: #fff;
+        --btn-sec-bg: rgba(255, 255, 255, 0.6);
+        --btn-sec-border: rgba(139, 92, 246, 0.2);
+        --btn-sec-text: #2d1f3d;
+        --btn-sec-hover: rgba(255, 255, 255, 0.9);
+        --status-bg: rgba(139, 92, 246, 0.05);
+        --status-border: rgba(139, 92, 246, 0.12);
+        --status-text: #6b5a7a;
+        --badge-bg: rgba(139, 92, 246, 0.1);
+        --badge-border: rgba(139, 92, 246, 0.25);
+        --badge-text: #7c3aed;
+        --accent: #0d9488;
+        --accent-ring: rgba(13, 148, 136, 0.2);
+        --check-accent: #0d9488;
+        --people-title: #3d2a55;
+        --person-bg: rgba(255, 255, 255, 0.5);
+        --person-border: rgba(139, 92, 246, 0.1);
+        --person-name: #2d1f3d;
+        --message-color: #0d9488;
+        --toggle-bg: rgba(255, 255, 255, 0.6);
+        --toggle-border: rgba(139, 92, 246, 0.2);
+        --toggle-text: #2d1f3d;
+      }
+
+      body {
+        margin: 0;
+        font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+        transition: background 0.3s, color 0.3s;
+      }
+      main {
+        max-width: 860px;
+        margin: 2.5rem auto 3rem;
+        padding: 0 1rem 2rem;
+      }
+      section {
+        border: 1px solid var(--card-border);
+        border-radius: 16px;
+        padding: 1.2rem;
+        background: var(--card-bg);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 8px 32px var(--card-shadow);
+        transition: background 0.3s, border-color 0.3s, box-shadow 0.3s;
+      }
+      h1 {
+        margin: 0;
+        font-size: 1.6rem;
+        letter-spacing: -0.02em;
+        color: var(--heading);
+      }
+      p {
+        margin: 0.5rem 0 0;
+        color: var(--text-muted);
+      }
+      .row {
+        display: flex;
+        gap: 0.65rem;
+        flex-wrap: wrap;
+        margin-top: 1.1rem;
+        align-items: center;
+      }
+      input[type="text"] {
+        border: 1px solid var(--input-border);
+        border-radius: 10px;
+        padding: 0.62rem 0.72rem;
+        font: inherit;
+        min-width: 220px;
+        background: var(--input-bg);
+        color: var(--text);
+        transition: background 0.3s, border-color 0.3s, color 0.3s;
+      }
+      input[type="text"]::placeholder {
+        color: var(--text-dim);
+      }
+      input[type="text"]:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-ring);
+      }
+      button {
+        border: 1px solid var(--btn-primary-bg);
+        border-radius: 10px;
+        background: var(--btn-primary-bg);
+        color: var(--btn-primary-text);
+        padding: 0.6rem 0.85rem;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s, color 0.15s;
+      }
+      button:hover {
+        background: var(--btn-primary-hover);
+        border-color: var(--btn-primary-hover);
+      }
+      button.secondary {
+        background: var(--btn-sec-bg);
+        color: var(--btn-sec-text);
+        border-color: var(--btn-sec-border);
+      }
+      button.secondary:hover {
+        background: var(--btn-sec-hover);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      #status {
+        margin-top: 1rem;
+        white-space: pre-wrap;
+        border: 1px solid var(--status-border);
+        border-radius: 10px;
+        padding: 0.75rem;
+        background: var(--status-bg);
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+          "Courier New", monospace;
+        font-size: 0.9rem;
+        color: var(--status-text);
+        transition: background 0.3s, border-color 0.3s, color 0.3s;
+      }
+      .hint {
+        margin-top: 0.45rem;
+        font-size: 0.92rem;
+      }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+      }
+      .header-right {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-shrink: 0;
+      }
+      .badge {
+        border: 1px solid var(--badge-border);
+        background: var(--badge-bg);
+        color: var(--badge-text);
+        padding: 0.2rem 0.55rem;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        font-weight: 700;
+        transition: background 0.3s, border-color 0.3s, color 0.3s;
+      }
+      #themeToggle {
+        background: var(--toggle-bg);
+        border: 1px solid var(--toggle-border);
+        color: var(--toggle-text);
+        padding: 0.2rem 0.45rem;
+        border-radius: 999px;
+        font-size: 1rem;
+        line-height: 1;
+        cursor: pointer;
+        transition: background 0.3s, border-color 0.3s;
+      }
+      #themeToggle:hover {
+        background: var(--btn-sec-hover);
+      }
+      #notifToggle {
+        background: var(--toggle-bg);
+        border: 1px solid var(--toggle-border);
+        color: var(--toggle-text);
+        padding: 0.2rem 0.45rem;
+        border-radius: 999px;
+        font-size: 1rem;
+        line-height: 1;
+        cursor: pointer;
+        transition: background 0.3s, border-color 0.3s, opacity 0.3s;
+      }
+      #notifToggle:hover {
+        background: var(--btn-sec-hover);
+      }
+      #notifToggle.subscribed {
+        color: var(--accent);
+      }
+      #notifToggle:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+      .check {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-weight: 600;
+      }
+      .check input {
+        width: 1.1rem;
+        height: 1.1rem;
+        cursor: pointer;
+        accent-color: var(--check-accent);
+      }
+      .people-title {
+        margin: 1rem 0 0.35rem;
+        font-weight: 600;
+        color: var(--people-title);
+      }
+      #peopleHere {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 0.45rem;
+      }
+      #noteInput {
+        min-width: 150px;
+        flex: 1;
+        max-width: 240px;
+      }
+      .person {
+        border: 1px solid var(--person-border);
+        border-radius: 10px;
+        background: var(--person-bg);
+        padding: 0.55rem 0.7rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        transition: background 0.3s, border-color 0.3s;
+      }
+      .person-name {
+        font-weight: 600;
+        color: var(--person-name);
+        flex: 1;
+      }
+      .person-time {
+        color: var(--text-dim);
+        font-size: 0.84rem;
+      }
+      .person-notes {
+        flex-basis: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+      .person-note {
+        color: var(--text-muted);
+        font-size: 0.82rem;
+        font-style: italic;
+      }
+      .person-note .note-from {
+        font-style: normal;
+        font-weight: 600;
+        font-size: 0.75rem;
+        color: var(--text-dim);
+      }
+      .note-input-row {
+        flex-basis: 100%;
+        display: flex;
+        gap: 0.4rem;
+        align-items: center;
+      }
+      .note-input-row input {
+        flex: 1;
+        min-width: 0;
+        font-size: 0.82rem;
+        padding: 0.3rem 0.5rem;
+        border-radius: 8px;
+      }
+      .note-input-row button {
+        font-size: 0.75rem;
+        padding: 0.3rem 0.55rem;
+        border-radius: 8px;
+      }
+      .person-reactions {
+        display: flex;
+        gap: 0.35rem;
+        flex-basis: 100%;
+        margin-top: 0.15rem;
+        flex-wrap: wrap;
+      }
+      .react-btn {
+        width: 20px;
+        height: 20px;
+        border-radius: 999px;
+        border: 2px solid transparent;
+        padding: 0;
+        cursor: pointer;
+        transition: transform 0.1s, border-color 0.15s, box-shadow 0.15s;
+        position: relative;
+        font-size: 0;
+      }
+      .react-btn:hover:not(:disabled) {
+        transform: scale(1.25);
+      }
+      .react-btn:active:not(:disabled) {
+        transform: scale(0.9);
+      }
+      .react-btn.reacted {
+        border-color: var(--text);
+        box-shadow: 0 0 6px rgba(255,255,255,0.3);
+      }
+      .react-btn:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+      }
+      .react-btn.active {
+        opacity: 1;
+      }
+      #message {
+        margin-top: 0.65rem;
+        min-height: 1.2rem;
+        color: var(--message-color);
+        font-size: 0.92rem;
+      }
+      .sparkle {
+        position: fixed;
+        pointer-events: none;
+        font-size: 14px;
+        animation: sparkle-fade 0.6s ease-out forwards;
+        z-index: 9999;
+      }
+      @keyframes sparkle-fade {
+        0% { opacity: 1; transform: translate(0, 0) scale(1) rotate(0deg); }
+        100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0.2) rotate(120deg); }
+      }
+      /* -- confetti burst -- */
+      .confetti {
+        position: fixed;
+        pointer-events: none;
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
+        z-index: 9999;
+        animation: confetti-fall var(--duration) ease-out forwards;
+      }
+      @keyframes confetti-fall {
+        0% { opacity: 1; transform: translate(0, 0) rotate(0deg) scale(1); }
+        100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(0.3); }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section>
+        <div class="header">
+          <div>
+            <h1>clymbe</h1>
+            <p>check in at vital lower east side.</p>
+            <p class="hint">enter your name, then toggle <strong>i'm here</strong>. get push notifications, leave notes, and pick colors.</p>
+          </div>
+          <div class="header-right">
+            <span class="badge">no login</span>
+            <button id="notifToggle" aria-label="Toggle notifications" hidden>🔕</button>
+            <button id="themeToggle" aria-label="Toggle theme">🌙</button>
+          </div>
+        </div>
+        <div class="row">
+          <input id="nameInput" type="text" placeholder="your name" autocomplete="name" />
+          <input id="noteInput" type="text" placeholder="note (optional)" maxlength="60" />
+          <label class="check">
+            <input id="isHere" type="checkbox" />
+            i'm here
+          </label>
+          <button id="refresh" class="secondary">refresh</button>
+          <button id="reset" class="secondary">reset</button>
+        </div>
+        <div id="message"></div>
+        <div id="status">loading status...</div>
+        <p class="people-title">people currently here</p>
+        <ul id="peopleHere"></ul>
+      </section>
+    </main>
+    <script>
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("/sw.js").catch(() => {});
+      }
+
+      const NAME_STORAGE_KEY = "clymbe_checkin_name";
+      const THEME_KEY = "clymbe_theme";
+      const NOTIF_PREF_KEY = "clymbe_notif_pref";
+      const statusEl = document.getElementById("status");
+      const messageEl = document.getElementById("message");
+      const peopleHereEl = document.getElementById("peopleHere");
+      const nameInputEl = document.getElementById("nameInput");
+      const noteInputEl = document.getElementById("noteInput");
+      const isHereEl = document.getElementById("isHere");
+      const refreshEl = document.getElementById("refresh");
+      const resetEl = document.getElementById("reset");
+      const themeToggleEl = document.getElementById("themeToggle");
+      const notifToggleEl = document.getElementById("notifToggle");
+      const REACTION_COLORS = ["#f9a8d4", "#a5b4fc", "#86efac", "#fde68a", "#c4b5fd"];
+
+      function hexToRgb(hex) {
+        const n = parseInt(hex.slice(1), 16);
+        return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+      }
+
+      function computeReactionBackground(reactions) {
+        if (!reactions) return null;
+        const activeColors = REACTION_COLORS.filter(
+          (c) => reactions[c] && reactions[c].length > 0
+        );
+        if (activeColors.length === 0) return null;
+        const rgbs = activeColors.map(hexToRgb);
+        return [0, 1, 2].map(
+          (i) => Math.round(rgbs.reduce((sum, rgb) => sum + rgb[i], 0) / rgbs.length)
+        );
+      }
+
+      let syncing = false;
+      let currentStatus = null;
+
+      // theme toggle
+      const getTheme = () => document.documentElement.getAttribute("data-theme");
+      const setTheme = (theme) => {
+        document.documentElement.setAttribute("data-theme", theme);
+        themeToggleEl.textContent = theme === "dark" ? "🌙" : "☀️";
+        localStorage.setItem(THEME_KEY, theme);
+      };
+      const savedTheme = localStorage.getItem(THEME_KEY);
+      if (savedTheme) setTheme(savedTheme);
+      themeToggleEl.addEventListener("click", () => {
+        setTheme(getTheme() === "dark" ? "light" : "dark");
+        if (currentStatus) renderPeopleHere(currentStatus);
+      });
+
+      const normalizeName = (name) => name.trim().replace(/\s+/g, " ");
+
+      // push notification management
+      const pushSupported = "serviceWorker" in navigator && "PushManager" in window;
+      let pushSubscription = null;
+
+      function urlBase64ToUint8Array(base64String) {
+        const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+        const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+        const rawData = atob(base64);
+        return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+      }
+
+      async function subscribeToPush() {
+        try {
+          const permission = await Notification.requestPermission();
+          if (permission !== "granted") {
+            messageEl.textContent = "notification permission was denied";
+            return false;
+          }
+          const reg = await navigator.serviceWorker.ready;
+          const res = await fetch("/api/vapid-public-key");
+          const { publicKey } = await res.json();
+          pushSubscription = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(publicKey),
+          });
+          const name = normalizeName(nameInputEl.value);
+          await fetch("/api/push/subscribe", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name, subscription: pushSubscription.toJSON() }),
+          });
+          localStorage.setItem(NOTIF_PREF_KEY, "subscribed");
+          return true;
+        } catch (err) {
+          console.error("push subscribe failed:", err);
+          messageEl.textContent = "could not enable notifications";
+          return false;
+        }
+      }
+
+      async function unsubscribeFromPush() {
+        try {
+          if (pushSubscription) {
+            const endpoint = pushSubscription.endpoint;
+            await pushSubscription.unsubscribe();
+            await fetch("/api/push/unsubscribe", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ endpoint }),
+            });
+          }
+          pushSubscription = null;
+          localStorage.setItem(NOTIF_PREF_KEY, "unsubscribed");
+          return true;
+        } catch (err) {
+          console.error("push unsubscribe failed:", err);
+          messageEl.textContent = "could not disable notifications";
+          return false;
+        }
+      }
+
+      function updateNotifButton() {
+        const name = normalizeName(nameInputEl.value);
+        if (!pushSupported || !name) {
+          notifToggleEl.hidden = true;
+          return;
+        }
+        notifToggleEl.hidden = false;
+        if (Notification.permission === "denied") {
+          notifToggleEl.disabled = true;
+          notifToggleEl.textContent = "🔕";
+          notifToggleEl.classList.remove("subscribed");
+          notifToggleEl.title = "notifications blocked in browser settings";
+          return;
+        }
+        notifToggleEl.disabled = false;
+        if (pushSubscription) {
+          notifToggleEl.textContent = "🔔";
+          notifToggleEl.classList.add("subscribed");
+          notifToggleEl.title = "notifications on (click to turn off)";
+        } else {
+          notifToggleEl.textContent = "🔕";
+          notifToggleEl.classList.remove("subscribed");
+          notifToggleEl.title = "notifications off (click to turn on)";
+        }
+      }
+
+      async function initPushState() {
+        if (!pushSupported) return;
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          pushSubscription = await reg.pushManager.getSubscription();
+        } catch { /* ignore */ }
+        updateNotifButton();
+      }
+
+      notifToggleEl.addEventListener("click", async () => {
+        notifToggleEl.disabled = true;
+        if (pushSubscription) {
+          const ok = await unsubscribeFromPush();
+          if (ok) messageEl.textContent = "notifications turned off";
+        } else {
+          const ok = await subscribeToPush();
+          if (ok) messageEl.textContent = "notifications turned on";
+        }
+        updateNotifButton();
+      });
+
+      initPushState();
+
+      const isNameHere = (name, people) =>
+        people.some((person) => person.name.toLowerCase() === name.toLowerCase());
+
+      const formatDateTime = (isoString) => {
+        if (!isoString) {
+          return "never";
+        }
+        const date = new Date(isoString);
+        if (Number.isNaN(date.getTime())) {
+          return isoString;
+        }
+        return date.toLocaleString();
+      };
+
+      const formatStatus = (status) =>
+        [
+          `gym_name: ${status.gym_name}`,
+          `people_here_count: ${status.people_here.length}`,
+          `last_check_in: ${formatDateTime(status.last_check_in)}`,
+          `check_in_count: ${status.check_in_count}`,
+          `updated_at: ${formatDateTime(status.updated_at)}`,
+        ].join("\n");
+
+      const renderPeopleHere = (status) => {
+        peopleHereEl.innerHTML = "";
+        if (!status.people_here.length) {
+          const emptyEl = document.createElement("li");
+          emptyEl.className = "person";
+          emptyEl.textContent = "nobody checked in yet";
+          peopleHereEl.appendChild(emptyEl);
+          return;
+        }
+        const pastelColors = ["#f9a8d4", "#a5b4fc", "#86efac", "#fde68a", "#c4b5fd", "#93c5fd", "#fca5a5", "#5eead4"];
+        const myName = normalizeName(nameInputEl.value);
+
+        for (const person of status.people_here) {
+          const itemEl = document.createElement("li");
+          itemEl.className = "person";
+
+          const reactionRgb = computeReactionBackground(person.reactions);
+          if (reactionRgb) {
+            const [r, g, b] = reactionRgb;
+            const isDark = getTheme() === "dark";
+            const alpha = isDark ? 0.18 : 0.25;
+            itemEl.style.background = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+            itemEl.style.borderColor = `rgba(${r}, ${g}, ${b}, ${isDark ? 0.3 : 0.35})`;
+          }
+
+          const nameSpan = document.createElement("span");
+          nameSpan.className = "person-name";
+          nameSpan.textContent = person.name;
+          if (reactionRgb) {
+            nameSpan.style.color = `rgb(${reactionRgb[0]}, ${reactionRgb[1]}, ${reactionRgb[2]})`;
+          } else {
+            const colorIndex = [...person.name].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % pastelColors.length;
+            nameSpan.style.color = pastelColors[colorIndex];
+          }
+
+          const timeSpan = document.createElement("span");
+          timeSpan.className = "person-time";
+          timeSpan.textContent = `since ${formatDateTime(person.checked_in_at)}`;
+
+          itemEl.appendChild(nameSpan);
+          itemEl.appendChild(timeSpan);
+
+          // notes
+          if (person.notes && person.notes.length > 0) {
+            const notesDiv = document.createElement("div");
+            notesDiv.className = "person-notes";
+            for (const note of person.notes) {
+              const noteSpan = document.createElement("span");
+              noteSpan.className = "person-note";
+              const isSelf = note.from.toLowerCase() === person.name.toLowerCase();
+              noteSpan.innerHTML = isSelf
+                ? `"${note.text}"`
+                : `<span class="note-from">${note.from}:</span> "${note.text}"`;
+              notesDiv.appendChild(noteSpan);
+            }
+            itemEl.appendChild(notesDiv);
+          }
+
+          // color reactions
+          const reactionsDiv = document.createElement("div");
+          reactionsDiv.className = "person-reactions";
+          const isMe = myName && myName.toLowerCase() === person.name.toLowerCase();
+
+          for (const color of REACTION_COLORS) {
+            const btn = document.createElement("button");
+            btn.className = "react-btn";
+            btn.style.background = color;
+            const reactors = (person.reactions && person.reactions[color]) || [];
+            const iReacted = myName && reactors.some((r) => r.toLowerCase() === myName.toLowerCase());
+
+            if (iReacted) btn.classList.add("reacted");
+            if (reactors.length > 0) btn.classList.add("active");
+
+            if (!myName) {
+              btn.disabled = true;
+            } else {
+              btn.addEventListener("click", () => sendReaction(person.name, color));
+            }
+
+            reactionsDiv.appendChild(btn);
+          }
+
+          itemEl.appendChild(reactionsDiv);
+
+          // note input for others
+          if (myName && !isMe) {
+            const noteRow = document.createElement("div");
+            noteRow.className = "note-input-row";
+            const noteIn = document.createElement("input");
+            noteIn.type = "text";
+            noteIn.placeholder = "leave a note...";
+            noteIn.maxLength = 60;
+            const noteBtn = document.createElement("button");
+            noteBtn.className = "secondary";
+            noteBtn.textContent = "send";
+            noteBtn.addEventListener("click", async () => {
+              const text = noteIn.value.trim();
+              if (!text) return;
+              noteBtn.disabled = true;
+              await sendNote(person.name, text);
+              noteIn.value = "";
+              noteBtn.disabled = false;
+            });
+            noteIn.addEventListener("keydown", (e) => {
+              if (e.key === "Enter") noteBtn.click();
+            });
+            noteRow.appendChild(noteIn);
+            noteRow.appendChild(noteBtn);
+            itemEl.appendChild(noteRow);
+          }
+
+          peopleHereEl.appendChild(itemEl);
+        }
+      };
+
+      const syncCheckboxFromName = () => {
+        const name = normalizeName(nameInputEl.value);
+        if (!currentStatus || !name) {
+          syncing = true;
+          isHereEl.checked = false;
+          syncing = false;
+          return;
+        }
+
+        syncing = true;
+        isHereEl.checked = isNameHere(name, currentStatus.people_here);
+        syncing = false;
+      };
+
+      const loadStatus = async () => {
+        try {
+          const response = await fetch("/api/status");
+          const status = await response.json();
+          currentStatus = status;
+          syncCheckboxFromName();
+          statusEl.textContent = formatStatus(status);
+          renderPeopleHere(status);
+          if (!messageEl.textContent) {
+            messageEl.textContent = "";
+          }
+        } catch (error) {
+          statusEl.textContent = `status fetch failed: ${String(error)}`;
+          messageEl.textContent = "could not load current state";
+        }
+      };
+
+      // -- celebration animations --
+      const confettiColors = ["#f28c5a", "#5ce0d8", "#c4b5fd", "#f5a070", "#8b5cf6", "#ec4899", "#facc15"];
+
+      function celebrateCheckIn() {
+        const count = 40;
+        const originX = window.innerWidth / 2;
+        const originY = window.innerHeight * 0.3;
+        for (let i = 0; i < count; i++) {
+          const el = document.createElement("div");
+          el.className = "confetti";
+          el.style.left = originX + "px";
+          el.style.top = originY + "px";
+          el.style.background = confettiColors[Math.floor(Math.random() * confettiColors.length)];
+          const angle = Math.random() * Math.PI * 2;
+          const distance = 80 + Math.random() * 200;
+          el.style.setProperty("--dx", Math.cos(angle) * distance + "px");
+          el.style.setProperty("--dy", (Math.sin(angle) * distance - 60) + "px");
+          el.style.setProperty("--rot", (Math.random() * 720 - 360) + "deg");
+          el.style.setProperty("--duration", (0.6 + Math.random() * 0.6) + "s");
+          el.style.animationDelay = (Math.random() * 0.15) + "s";
+          document.body.appendChild(el);
+          el.addEventListener("animationend", () => el.remove());
+        }
+      }
+
+      async function sendReaction(targetName, color) {
+        const myName = normalizeName(nameInputEl.value);
+        if (!myName) {
+          messageEl.textContent = "enter your name first";
+          return;
+        }
+        try {
+          const response = await fetch("/api/react", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ reactor: myName, target: targetName, emoji: color }),
+          });
+          if (!response.ok) {
+            const errorBody = await response.json().catch(() => ({ message: "reaction failed" }));
+            throw new Error(errorBody.message || "reaction failed");
+          }
+          await loadStatus();
+        } catch (error) {
+          messageEl.textContent = error instanceof Error ? error.message : "reaction failed";
+        }
+      }
+
+      async function sendNote(targetName, text) {
+        const myName = normalizeName(nameInputEl.value);
+        if (!myName) {
+          messageEl.textContent = "enter your name first";
+          return;
+        }
+        try {
+          const response = await fetch("/api/note", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ from: myName, target: targetName, text }),
+          });
+          if (!response.ok) {
+            const errorBody = await response.json().catch(() => ({ message: "note failed" }));
+            throw new Error(errorBody.message || "note failed");
+          }
+          await loadStatus();
+        } catch (error) {
+          messageEl.textContent = error instanceof Error ? error.message : "note failed";
+        }
+      }
+
+      isHereEl.addEventListener("change", async () => {
+        if (syncing) {
+          return;
+        }
+        const name = normalizeName(nameInputEl.value);
+        if (!name) {
+          messageEl.textContent = "enter your name first";
+          syncing = true;
+          isHereEl.checked = false;
+          syncing = false;
+          return;
+        }
+
+        isHereEl.disabled = true;
+        nameInputEl.disabled = true;
+        noteInputEl.disabled = true;
+        try {
+          const note = noteInputEl.value.trim().slice(0, 60);
+          const response = await fetch("/api/presence", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              name,
+              is_here: isHereEl.checked,
+              ...(isHereEl.checked && note ? { note } : {}),
+            }),
+          });
+          if (!response.ok) {
+            const errorBody = await response
+              .json()
+              .catch(() => ({ message: "presence update failed" }));
+            throw new Error(errorBody.message || "presence update failed");
+          }
+          messageEl.textContent = `${name} is now ${
+            isHereEl.checked ? "here" : "not here"
+          }`;
+          if (isHereEl.checked) {
+            celebrateCheckIn();
+          }
+        } catch (error) {
+          messageEl.textContent = error instanceof Error ? error.message : "presence update failed";
+        } finally {
+          isHereEl.disabled = false;
+          nameInputEl.disabled = false;
+          noteInputEl.disabled = false;
+          await loadStatus();
+        }
+      });
+
+      nameInputEl.addEventListener("input", () => {
+        const value = normalizeName(nameInputEl.value);
+        if (value.length > 0) {
+          window.localStorage.setItem(NAME_STORAGE_KEY, value);
+        } else {
+          window.localStorage.removeItem(NAME_STORAGE_KEY);
+        }
+        syncCheckboxFromName();
+        updateNotifButton();
+        if (pushSubscription && value) {
+          fetch("/api/push/subscribe", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name: value, subscription: pushSubscription.toJSON() }),
+          }).catch(() => {});
+        }
+      });
+
+      refreshEl.addEventListener("click", loadStatus);
+
+      resetEl.addEventListener("click", async () => {
+        await fetch("/api/reset", { method: "POST" });
+        messageEl.textContent = "reset complete";
+        await loadStatus();
+      });
+
+      const savedName = window.localStorage.getItem(NAME_STORAGE_KEY);
+      if (savedName) {
+        nameInputEl.value = savedName;
+      }
+
+      loadStatus();
+
+      window.addEventListener("online", () => {
+        messageEl.textContent = "back online";
+        loadStatus();
+      });
+      window.addEventListener("offline", () => {
+        messageEl.textContent = "you are offline — showing last known data";
+      });
+
+      // sparkle cursor trail
+      const darkSparkleColors = ["#f28c5a", "#5ce0d8", "#c4b5fd", "#f5a070", "#8b5cf6"];
+      const lightSparkleColors = ["#e87a48", "#0d9488", "#7c3aed", "#f28c5a", "#a855f7"];
+      const sparkleChars = ["✦", "✧", "⋆", "·"];
+      let lastSparkle = 0;
+      document.addEventListener("mousemove", (e) => {
+        const now = Date.now();
+        if (now - lastSparkle < 50) return;
+        lastSparkle = now;
+        const colors = getTheme() === "dark" ? darkSparkleColors : lightSparkleColors;
+        const el = document.createElement("span");
+        el.className = "sparkle";
+        el.textContent = sparkleChars[Math.floor(Math.random() * sparkleChars.length)];
+        el.style.left = e.clientX + "px";
+        el.style.top = e.clientY + "px";
+        el.style.color = colors[Math.floor(Math.random() * colors.length)];
+        el.style.setProperty("--dx", (Math.random() - 0.5) * 30 + "px");
+        el.style.setProperty("--dy", (Math.random() * -20 - 10) + "px");
+        document.body.appendChild(el);
+        el.addEventListener("animationend", () => el.remove());
+      });
+    </script>
+  </body>
+</html>

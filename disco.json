@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "services": {
+    "web": {
+      "port": 5353,
+      "volumes": [
+        {
+          "name": "data",
+          "destinationPath": "/data"
+        }
+      ]
+    }
+  }
+}
