@@ -36,8 +36,6 @@ const normalizeName = (name: string): string => name.trim().replace(/\s+/g, " ")
 const namesEqual = (left: string, right: string): boolean =>
   left.toLowerCase() === right.toLowerCase();
 
-const MAX_SELF_NOTE_LENGTH = 60;
-
 const formatCheckoutLabel = (checkoutAt: string): string => {
   const time = new Date(checkoutAt).toLocaleTimeString([], {
     hour: "numeric",
@@ -49,20 +47,15 @@ const formatCheckoutLabel = (checkoutAt: string): string => {
 const buildPresenceNote = (customNote: string | undefined, checkoutAt?: string): string | undefined => {
   const trimmedCustom = customNote?.trim();
   if (!checkoutAt) {
-    return trimmedCustom ? trimmedCustom.slice(0, MAX_SELF_NOTE_LENGTH) : undefined;
+    return trimmedCustom || undefined;
   }
 
   const untilLabel = formatCheckoutLabel(checkoutAt);
   if (!trimmedCustom) {
-    return untilLabel.slice(0, MAX_SELF_NOTE_LENGTH);
+    return untilLabel;
   }
 
-  const separator = " | ";
-  const remaining = MAX_SELF_NOTE_LENGTH - separator.length - untilLabel.length;
-  if (remaining <= 0) {
-    return untilLabel.slice(0, MAX_SELF_NOTE_LENGTH);
-  }
-  return `${trimmedCustom.slice(0, remaining)}${separator}${untilLabel}`;
+  return `${trimmedCustom} | ${untilLabel}`;
 };
 
 const normalizeStatus = (value: unknown): Status => {
@@ -117,12 +110,12 @@ const normalizeStatus = (value: unknown): Status => {
           typeof (n as Record<string, unknown>).from === "string" &&
           typeof (n as Record<string, unknown>).text === "string"
         )
-        .map((n) => ({ from: normalizeName(n.from as string), text: (n.text as string).slice(0, 60) }))
+        .map((n) => ({ from: normalizeName(n.from as string), text: n.text as string }))
         .filter((n) => n.from.length > 0 && n.text.length > 0);
       if (validNotes.length > 0) entry.notes = validNotes;
     } else if (typeof candidatePerson.note === "string" && candidatePerson.note.length > 0) {
       // migrate old single-note format
-      entry.notes = [{ from: normalized, text: candidatePerson.note.slice(0, 60) }];
+      entry.notes = [{ from: normalized, text: candidatePerson.note }];
     }
     if (candidatePerson.reactions && typeof candidatePerson.reactions === "object") {
       entry.reactions = candidatePerson.reactions as Record<string, string[]>;
@@ -345,7 +338,7 @@ const store = {
     const notes = person.notes ? [...person.notes] : [];
     // Replace existing note from this person, or add new
     const existingIdx = notes.findIndex((n) => namesEqual(n.from, normalizedFrom));
-    const newNote = { from: normalizedFrom, text: text.slice(0, 60) };
+    const newNote = { from: normalizedFrom, text };
     if (existingIdx !== -1) {
       notes[existingIdx] = newNote;
     } else {
@@ -576,7 +569,7 @@ router.post("/api/note", async (ctx: Ctx) => {
   const gym = b.gym;
   const from = normalizeName(b.from as string);
   const target = normalizeName(b.target as string);
-  const text = (b.text as string).trim().slice(0, 60);
+  const text = (b.text as string).trim();
 
   if (!text) {
     ctx.response.status = 400;
