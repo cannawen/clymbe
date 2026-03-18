@@ -116,10 +116,18 @@
         transition: background 0.3s, border-color 0.3s, box-shadow 0.3s;
       }
       h1 {
-        margin: 0;
-        font-size: 1.6rem;
+        margin: 0 0 0.6rem 0;
+        font-size: clamp(2.8rem, 6vw, 4.2rem);
+        font-weight: 500;
         letter-spacing: -0.02em;
         color: var(--heading);
+        line-height: 0.95;
+      }
+      .title-row {
+        display: flex;
+        align-items: flex-end;
+        gap: 0.6rem;
+        flex-wrap: wrap;
       }
       select {
         display: block;
@@ -164,6 +172,15 @@
         background-position: right 0.5rem center;
         padding-right: 1.75rem;
       }
+      .title-select {
+        display: inline-block;
+        margin: 0;
+        min-width: min(260px, 100%);
+        font-size: 1rem;
+        font-weight: 600;
+        vertical-align: bottom;
+        align-self: flex-end;
+      }
       button {
         border: 1px solid var(--btn-primary-bg);
         border-radius: 10px;
@@ -206,13 +223,13 @@
         transition: background 0.3s, border-color 0.3s, color 0.3s;
       }
       .hint {
-        margin-top: 0.45rem;
+        margin-top: 2rem;
         font-size: 0.92rem;
       }
       .header {
         display: flex;
         justify-content: space-between;
-        align-items: flex-start;
+        align-items: flex-end;
         gap: 1rem;
       }
       .header-right {
@@ -220,6 +237,12 @@
         align-items: center;
         gap: 0.5rem;
         flex-shrink: 0;
+        align-self: flex-start;
+      }
+      @media (max-width: 640px) {
+        .title-select {
+          min-width: 100%;
+        }
       }
       .badge {
         border: 1px solid var(--badge-border);
@@ -424,11 +447,13 @@
       <section>
         <div class="header">
           <div>
-            <h1>clymbe</h1>
-            <select id="gymSelect">
-              <option value="Vital Lower East Side">Vital Lower East Side</option>
-              <option value="Bouldering Project">Bouldering Project</option>
-            </select>
+            <h1 class="title-row">
+              <span>clymbe @</span>
+              <select id="gymSelect" class="title-select" aria-label="Select gym location">
+                <option value="Vital Lower East Side">Vital Lower East Side</option>
+                <option value="Bouldering Project">Bouldering Project</option>
+              </select>
+            </h1>
             <p class="hint">enter your name, then toggle <strong>i'm here</strong>. get push notifications, leave notes, and pick colors.</p>
           </div>
           <div class="header-right">
@@ -514,9 +539,11 @@
       const setSelectedGym = (gym) => {
         gymSelectEl.value = gym;
         localStorage.setItem(GYM_STORAGE_KEY, gym);
+        document.title = `clymbe @ ${gym}`;
       };
       const savedGym = localStorage.getItem(GYM_STORAGE_KEY);
       if (savedGym) setSelectedGym(savedGym);
+      else setSelectedGym(getSelectedGym());
       gymSelectEl.addEventListener("change", () => {
         setSelectedGym(getSelectedGym());
         syncCheckboxFromName();
