@@ -504,11 +504,12 @@
         <div class="row">
           <input id="nameInput" type="text" placeholder="your name" autocomplete="name" />
           <input id="noteInput" type="text" placeholder="note (optional)" maxlength="60" />
+          <label class="check">
+            <input id="isHere" type="checkbox" />
+            i'm here
+          </label>
           <div class="check-with-duration">
-            <label class="check">
-              <input id="isHere" type="checkbox" />
-              i'm here for
-            </label>
+            <span>i'm here for</span>
             <div class="duration-buttons">
               <button class="duration" data-hours="1">1</button>
               <button class="duration" data-hours="2">2</button>
@@ -850,17 +851,75 @@
 
       const syncCheckboxFromName = () => {
         const name = normalizeName(nameInputEl.value);
-        if (!currentStatus || !name) {
-          syncing = true;
+        if (!currentStatus) {
           isHereEl.checked = false;
-          syncing = false;
+          return;
+        }
+        if (!name) {
+          isHereEl.checked = false;
+          return;
+        }
+        syncing = true;
+        isHereEl.checked = isNameHere(name, currentStatus.people_here || []);
+        syncing = false;
+      };
+
+      async function submitPresence(isHere, hours) {
+        const name = normalizeName(nameInputEl.value);
+        const customNote = noteInputEl.value.trim();
+        if (!name) {
+          messageEl.textContent = "enter your name first";
           return;
         }
 
-        syncing = true;
-        isHereEl.checked = isNameHere(name, currentStatus.people_here);
-        syncing = false;
-      };
+        nameInputEl.disabled = true;
+        noteInputEl.disabled = true;
+        isHereEl.disabled = true;
+        durationButtonsEl.forEach((button) => {
+          button.disabled = true;
+        });
+
+        try {
+          const gym = getSelectedGym();
+          const response = await fetch("/api/presence", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              name,
+              gym,
+              is_here: isHere,
+              ...(typeof hours === "number" ? { hours } : {}),
+              ...(customNote ? { note: customNote } : {}),
+            }),
+          });
+
+          if (!response.ok) {
+            const errorBody = await response
+              .json()
+              .catch(() => ({ message: "presence update failed" }));
+            throw new Error(errorBody.message || "presence update failed");
+          }
+
+          messageEl.textContent = isHere ? `${name} is now here` : `${name} checked out`;
+          if (isHere) {
+            celebrateCheckIn();
+          }
+        } catch (error) {
+          messageEl.textContent =
+            error instanceof Error ? error.message : "presence update failed";
+          syncing = true;
+          isHereEl.checked = !isHere;
+          syncing = false;
+        } finally {
+          nameInputEl.disabled = false;
+          noteInputEl.disabled = false;
+          isHereEl.disabled = false;
+          durationButtonsEl.forEach((button) => {
+            button.disabled = false;
+          });
+          await loadStatus();
+        }
+      }
 
       const loadStatus = async () => {
         try {
@@ -955,51 +1014,7 @@
         if (syncing) {
           return;
         }
-        const name = normalizeName(nameInputEl.value);
-        if (!name) {
-          messageEl.textContent = "enter your name first";
-          syncing = true;
-          isHereEl.checked = false;
-          syncing = false;
-          return;
-        }
-
-        isHereEl.disabled = true;
-        nameInputEl.disabled = true;
-        noteInputEl.disabled = true;
-        try {
-          const note = noteInputEl.value.trim().slice(0, 60);
-          const gym = getSelectedGym();
-          const response = await fetch("/api/presence", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              name,
-              gym,
-              is_here: isHereEl.checked,
-              ...(isHereEl.checked && note ? { note } : {}),
-            }),
-          });
-          if (!response.ok) {
-            const errorBody = await response
-              .json()
-              .catch(() => ({ message: "presence update failed" }));
-            throw new Error(errorBody.message || "presence update failed");
-          }
-          messageEl.textContent = `${name} is now ${
-            isHereEl.checked ? "here" : "not here"
-          }`;
-          if (isHereEl.checked) {
-            celebrateCheckIn();
-          }
-        } catch (error) {
-          messageEl.textContent = error instanceof Error ? error.message : "presence update failed";
-        } finally {
-          isHereEl.disabled = false;
-          nameInputEl.disabled = false;
-          noteInputEl.disabled = false;
-          await loadStatus();
-        }
+        await submitPresence(isHereEl.checked);
       });
 
       nameInputEl.addEventListener("input", () => {
@@ -1025,48 +1040,14 @@
 
       durationButtonsEl.forEach((btn) => {
         btn.addEventListener("click", async () => {
-          const hours = btn.getAttribute("data-hours");
-          const name = normalizeName(nameInputEl.value);
-          if (!name) {
-            messageEl.textContent = "enter your name first";
+          const hours = parseInt(btn.getAttribute("data-hours") || "0", 10);
+          if (hours <= 0) {
             return;
           }
-
-          isHereEl.disabled = true;
-          nameInputEl.disabled = true;
-          noteInputEl.disabled = true;
-          btn.disabled = true;
-
-          try {
-            const note = `I'm here for ${hours} hour${hours !== "1" ? "s" : ""}`;
-            const gym = getSelectedGym();
-            const response = await fetch("/api/presence", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                name,
-                gym,
-                is_here: true,
-                note,
-              }),
-            });
-            if (!response.ok) {
-              const errorBody = await response
-                .json()
-                .catch(() => ({ message: "presence update failed" }));
-              throw new Error(errorBody.message || "presence update failed");
-            }
-            messageEl.textContent = `${name} is now here for ${hours} hour${hours !== "1" ? "s" : ""}`;
-            celebrateCheckIn();
-          } catch (error) {
-            messageEl.textContent = error instanceof Error ? error.message : "presence update failed";
-          } finally {
-            isHereEl.disabled = false;
-            nameInputEl.disabled = false;
-            noteInputEl.disabled = false;
-            btn.disabled = false;
-            await loadStatus();
-          }
+          syncing = true;
+          isHereEl.checked = true;
+          syncing = false;
+          await submitPresence(true, hours);
         });
       });
 

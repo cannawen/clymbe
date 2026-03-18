@@ -10,6 +10,7 @@ type Note = { from: string; text: string };
 type PersonHere = {
   name: string;
   checked_in_at: string;
+  checkout_at?: string;
   notes?: Note[];
   reactions?: Record<string, string[]>;
 };
@@ -34,6 +35,35 @@ const normalizeName = (name: string): string => name.trim().replace(/\s+/g, " ")
 
 const namesEqual = (left: string, right: string): boolean =>
   left.toLowerCase() === right.toLowerCase();
+
+const MAX_SELF_NOTE_LENGTH = 60;
+
+const formatCheckoutLabel = (checkoutAt: string): string => {
+  const time = new Date(checkoutAt).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `Here until ${time}`;
+};
+
+const buildPresenceNote = (customNote: string | undefined, checkoutAt?: string): string | undefined => {
+  const trimmedCustom = customNote?.trim();
+  if (!checkoutAt) {
+    return trimmedCustom ? trimmedCustom.slice(0, MAX_SELF_NOTE_LENGTH) : undefined;
+  }
+
+  const untilLabel = formatCheckoutLabel(checkoutAt);
+  if (!trimmedCustom) {
+    return untilLabel.slice(0, MAX_SELF_NOTE_LENGTH);
+  }
+
+  const separator = " | ";
+  const remaining = MAX_SELF_NOTE_LENGTH - separator.length - untilLabel.length;
+  if (remaining <= 0) {
+    return untilLabel.slice(0, MAX_SELF_NOTE_LENGTH);
+  }
+  return `${trimmedCustom.slice(0, remaining)}${separator}${untilLabel}`;
+};
 
 const normalizeStatus = (value: unknown): Status => {
   if (typeof value !== "object" || value === null) {
@@ -77,6 +107,9 @@ const normalizeStatus = (value: unknown): Status => {
           ? candidatePerson.checked_in_at
           : lastCheckIn ?? now
     };
+    if (typeof candidatePerson.checkout_at === "string") {
+      entry.checkout_at = candidatePerson.checkout_at;
+    }
     if (Array.isArray(candidatePerson.notes)) {
       const validNotes = (candidatePerson.notes as unknown[])
         .filter((n): n is Record<string, unknown> =>
@@ -138,7 +171,6 @@ async function initVapid(): Promise<VapidKeys> {
   console.log("generated new vapid keys (stored in kv)");
   return keys;
 }
-
 const vapidKeys = await initVapid();
 const vapidSubject = Deno.env.get("VAPID_SUBJECT") ?? "mailto:clymbe@example.com";
 webpush.setVapidDetails(vapidSubject, vapidKeys.publicKey, vapidKeys.privateKey);
@@ -236,7 +268,7 @@ const store = {
   async write(gym: string, status: Status): Promise<void> {
     await kv.set([...STATUS_KEY_PREFIX, gym], status);
   },
-  async setPresence(gym: string, name: string, isHere: boolean, note?: string): Promise<Status> {
+  async setPresence(gym: string, name: string, isHere: boolean, note?: string, hours?: number): Promise<Status> {
     const normalizedName = normalizeName(name);
     if (normalizedName.length === 0) {
       throw new Error("name is required");
@@ -249,21 +281,29 @@ const store = {
     );
 
     const peopleHere = [...current.people_here];
+    const checkoutAt =
+      hours && hours > 0
+        ? new Date(new Date(now).getTime() + hours * 60 * 60 * 1000).toISOString()
+        : undefined;
+    const presenceNote = buildPresenceNote(note, checkoutAt);
+
     if (isHere && existingIndex === -1) {
       const entry: PersonHere = { name: normalizedName, checked_in_at: now };
-      if (note) entry.notes = [{ from: normalizedName, text: note.slice(0, 60) }];
+      if (presenceNote) entry.notes = [{ from: normalizedName, text: presenceNote }];
+      if (checkoutAt) entry.checkout_at = checkoutAt;
       peopleHere.push(entry);
     } else if (isHere && existingIndex !== -1) {
       const existing = peopleHere[existingIndex];
       const updatedNotes = existing.notes ? [...existing.notes] : [];
-      if (note) {
+      if (presenceNote) {
         const selfIdx = updatedNotes.findIndex((n) => namesEqual(n.from, normalizedName));
-        if (selfIdx !== -1) updatedNotes[selfIdx] = { from: normalizedName, text: note.slice(0, 60) };
-        else updatedNotes.push({ from: normalizedName, text: note.slice(0, 60) });
+        if (selfIdx !== -1) updatedNotes[selfIdx] = { from: normalizedName, text: presenceNote };
+        else updatedNotes.push({ from: normalizedName, text: presenceNote });
       }
       peopleHere[existingIndex] = {
         ...existing,
         name: normalizedName,
+        ...(checkoutAt ? { checkout_at: checkoutAt } : {}),
         ...(updatedNotes.length > 0 ? { notes: updatedNotes } : {})
       };
     } else if (!isHere && existingIndex !== -1) {
@@ -369,6 +409,24 @@ const store = {
     };
     await this.write(gym, next);
     return next;
+  },
+  async autoCheckout(gym: string): Promise<void> {
+    const current = await this.read(gym);
+    const now = new Date();
+    const updated = current.people_here.filter((person) => {
+      if (!person.checkout_at) return true;
+      const checkoutTime = new Date(person.checkout_at);
+      return now < checkoutTime;
+    });
+
+    if (updated.length !== current.people_here.length) {
+      const next: Status = {
+        ...current,
+        people_here: updated,
+        updated_at: new Date().toISOString()
+      };
+      await this.write(gym, next);
+    }
   }
 };
 
@@ -377,6 +435,7 @@ const router = new Router();
 
 router.get("/api/status", async (ctx: Ctx) => {
   const gym = ctx.request.url.searchParams.get("gym") || gymName;
+  await store.autoCheckout(gym);
   ctx.response.body = await store.read(gym);
 });
 
@@ -409,9 +468,12 @@ router.post("/api/presence", async (ctx: Ctx) => {
   }
 
   const payload = body as { name: string; gym: string; is_here: boolean; note?: unknown };
-  const note = typeof payload.note === "string" ? payload.note.trim().slice(0, 60) : undefined;
+  const note = typeof payload.note === "string" ? payload.note.trim() : undefined;
   try {
-    const updatedStatus = await store.setPresence(payload.gym, payload.name, payload.is_here, note || undefined);
+    const hours = typeof (body as Record<string, unknown>).hours === "number" 
+      ? (body as Record<string, unknown>).hours as number
+      : undefined;
+    const updatedStatus = await store.setPresence(payload.gym, payload.name, payload.is_here, note || undefined, hours);
     ctx.response.body = updatedStatus;
 
     if (payload.is_here) {
@@ -654,5 +716,15 @@ app.use(async (ctx) => {
     }
   }
 });
+
+// Auto-checkout cleanup task - runs every 30 seconds.
+setInterval(async () => {
+  try {
+    const gyms = ["Vital Lower East Side", "Bouldering Project"];
+    await Promise.all(gyms.map((gym) => store.autoCheckout(gym)));
+  } catch (error) {
+    console.error("auto-checkout cleanup error:", error);
+  }
+}, 30000);
 
 await app.listen({ port });
