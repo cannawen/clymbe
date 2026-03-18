@@ -529,6 +529,7 @@
       const GYM_STORAGE_KEY = "clymbe_selected_gym";
       const THEME_KEY = "clymbe_theme";
       const NOTIF_PREF_KEY = "clymbe_notif_pref";
+      const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
       const statusEl = document.getElementById("status");
       const messageEl = document.getElementById("message");
       const peopleHereEl = document.getElementById("peopleHere");
@@ -1085,6 +1086,12 @@
       }
 
       loadStatus();
+
+      setInterval(() => {
+        if (!document.hidden) {
+          loadStatus();
+        }
+      }, AUTO_REFRESH_INTERVAL_MS);
 
       window.addEventListener("online", () => {
         messageEl.textContent = "back online";
