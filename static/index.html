@@ -703,6 +703,17 @@
         return date.toLocaleString();
       };
 
+      const formatTime = (isoString) => {
+        if (!isoString) {
+          return null;
+        }
+        const date = new Date(isoString);
+        if (Number.isNaN(date.getTime())) {
+          return null;
+        }
+        return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      };
+
       const formatStatus = (status) =>
         [
           `gym_name: ${status.gym_name}`,
@@ -749,16 +760,25 @@
 
           const timeSpan = document.createElement("span");
           timeSpan.className = "person-time";
-          timeSpan.textContent = `since ${formatDateTime(person.checked_in_at)}`;
+          const checkoutLabel = formatTime(person.checkout_at);
+          timeSpan.textContent = checkoutLabel
+            ? `since ${formatDateTime(person.checked_in_at)} · until ${checkoutLabel}`
+            : `since ${formatDateTime(person.checked_in_at)}`;
 
           itemEl.appendChild(nameSpan);
           itemEl.appendChild(timeSpan);
 
           // notes
-          if (person.notes && person.notes.length > 0) {
+          if ((person.notes && person.notes.length > 0) || checkoutLabel) {
             const notesDiv = document.createElement("div");
             notesDiv.className = "person-notes";
-            for (const note of person.notes) {
+            if (checkoutLabel) {
+              const untilSpan = document.createElement("span");
+              untilSpan.className = "person-note";
+              untilSpan.textContent = `Here until ${checkoutLabel}`;
+              notesDiv.appendChild(untilSpan);
+            }
+            for (const note of (person.notes || [])) {
               const noteSpan = document.createElement("span");
               noteSpan.className = "person-note";
               const isSelf = note.from.toLowerCase() === person.name.toLowerCase();
@@ -984,6 +1004,17 @@
           }).catch(() => {});
         }
       });
+
+      const handleQuickCheckInEnter = async (event) => {
+        if (event.key !== "Enter" || event.isComposing) {
+          return;
+        }
+        event.preventDefault();
+        await submitPresence(true, 1);
+      };
+
+      nameInputEl.addEventListener("keydown", handleQuickCheckInEnter);
+      noteInputEl.addEventListener("keydown", handleQuickCheckInEnter);
 
       refreshEl.addEventListener("click", loadStatus);
 

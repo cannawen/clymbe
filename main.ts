@@ -36,26 +36,9 @@ const normalizeName = (name: string): string => name.trim().replace(/\s+/g, " ")
 const namesEqual = (left: string, right: string): boolean =>
   left.toLowerCase() === right.toLowerCase();
 
-const formatCheckoutLabel = (checkoutAt: string): string => {
-  const time = new Date(checkoutAt).toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-  return `Here until ${time}`;
-};
-
-const buildPresenceNote = (customNote: string | undefined, checkoutAt?: string): string | undefined => {
+const buildPresenceNote = (customNote: string | undefined): string | undefined => {
   const trimmedCustom = customNote?.trim();
-  if (!checkoutAt) {
-    return trimmedCustom || undefined;
-  }
-
-  const untilLabel = formatCheckoutLabel(checkoutAt);
-  if (!trimmedCustom) {
-    return untilLabel;
-  }
-
-  return `${trimmedCustom} | ${untilLabel}`;
+  return trimmedCustom || undefined;
 };
 
 const normalizeStatus = (value: unknown): Status => {
@@ -278,7 +261,7 @@ const store = {
       hours && hours > 0
         ? new Date(new Date(now).getTime() + hours * 60 * 60 * 1000).toISOString()
         : undefined;
-    const presenceNote = buildPresenceNote(note, checkoutAt);
+    const presenceNote = buildPresenceNote(note);
 
     if (isHere && existingIndex === -1) {
       const entry: PersonHere = { name: normalizedName, checked_in_at: now };
@@ -288,17 +271,24 @@ const store = {
     } else if (isHere && existingIndex !== -1) {
       const existing = peopleHere[existingIndex];
       const updatedNotes = existing.notes ? [...existing.notes] : [];
+      const selfIdx = updatedNotes.findIndex((n) => namesEqual(n.from, normalizedName));
       if (presenceNote) {
-        const selfIdx = updatedNotes.findIndex((n) => namesEqual(n.from, normalizedName));
         if (selfIdx !== -1) updatedNotes[selfIdx] = { from: normalizedName, text: presenceNote };
         else updatedNotes.push({ from: normalizedName, text: presenceNote });
+      } else if (selfIdx !== -1) {
+        updatedNotes.splice(selfIdx, 1);
       }
-      peopleHere[existingIndex] = {
+      const updatedPerson: PersonHere = {
         ...existing,
         name: normalizedName,
-        ...(checkoutAt ? { checkout_at: checkoutAt } : {}),
         ...(updatedNotes.length > 0 ? { notes: updatedNotes } : {})
       };
+      if (checkoutAt) {
+        updatedPerson.checkout_at = checkoutAt;
+      } else {
+        delete updatedPerson.checkout_at;
+      }
+      peopleHere[existingIndex] = updatedPerson;
     } else if (!isHere && existingIndex !== -1) {
       peopleHere.splice(existingIndex, 1);
     }
