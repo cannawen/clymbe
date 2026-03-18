@@ -356,10 +356,22 @@
         flex-wrap: wrap;
         transition: background 0.3s, border-color 0.3s;
       }
+      .person-name-wrap {
+        display: flex;
+        align-items: baseline;
+        gap: 0.45rem;
+        flex: 1;
+        min-width: 0;
+        flex-wrap: wrap;
+      }
       .person-name {
         font-weight: 600;
         color: var(--person-name);
-        flex: 1;
+      }
+      .person-time-range {
+        color: var(--text-dim);
+        font-size: 0.76rem;
+        font-weight: 400;
       }
       .person-time {
         color: var(--text-dim);
@@ -714,6 +726,33 @@
         return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
       };
 
+      const formatPresenceDuration = (checkoutAt) => {
+        if (!checkoutAt) return null;
+        const now = new Date();
+        const checkout = new Date(checkoutAt);
+        const remainingMs = checkout.getTime() - now.getTime();
+        if (remainingMs <= 0) return null;
+        const remainingMinutes = remainingMs / (1000 * 60);
+        const chunkedMinutes = Math.floor(remainingMinutes / 15) * 15;
+        if (chunkedMinutes <= 15) return "Leaving soon";
+        if (chunkedMinutes < 60) return `here for another ${chunkedMinutes} minutes`;
+        const hours = Math.floor(chunkedMinutes / 60);
+        const mins = chunkedMinutes % 60;
+        const hoursLabel = hours === 1 ? "hour" : hours + " hours";
+        if (mins === 0) return "here for another " + hoursLabel;
+        if (mins === 30) return "here for another " + hoursLabel + " and a half";
+        return "here for another " + hoursLabel + " and " + mins + " minutes";
+      };
+
+      const formatTimeRange = (checkedInAt, checkoutAt) => {
+        const fmtTime = (isoString) =>
+          new Date(isoString)
+            .toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+            .toLowerCase()
+            .replace(/\s/g, "");
+        return `${fmtTime(checkedInAt)}–${fmtTime(checkoutAt)}`;
+      };
+
       const formatStatus = (status) =>
         [
           `gym_name: ${status.gym_name}`,
@@ -748,6 +787,9 @@
             itemEl.style.borderColor = `rgba(${r}, ${g}, ${b}, ${isDark ? 0.3 : 0.35})`;
           }
 
+          const nameWrap = document.createElement("div");
+          nameWrap.className = "person-name-wrap";
+
           const nameSpan = document.createElement("span");
           nameSpan.className = "person-name";
           nameSpan.textContent = person.name;
@@ -757,28 +799,30 @@
             const colorIndex = [...person.name].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % pastelColors.length;
             nameSpan.style.color = pastelColors[colorIndex];
           }
+          nameWrap.appendChild(nameSpan);
 
-          const timeSpan = document.createElement("span");
-          timeSpan.className = "person-time";
-          const checkoutLabel = formatTime(person.checkout_at);
-          timeSpan.textContent = checkoutLabel
-            ? `since ${formatDateTime(person.checked_in_at)} · until ${checkoutLabel}`
-            : `since ${formatDateTime(person.checked_in_at)}`;
+          if (person.checkout_at && person.checked_in_at) {
+            const rangeSpan = document.createElement("span");
+            rangeSpan.className = "person-time-range";
+            rangeSpan.textContent = formatTimeRange(person.checked_in_at, person.checkout_at);
+            nameWrap.appendChild(rangeSpan);
+          }
 
-          itemEl.appendChild(nameSpan);
-          itemEl.appendChild(timeSpan);
+          itemEl.appendChild(nameWrap);
+
+          const durationLabel = formatPresenceDuration(person.checkout_at);
+          if (durationLabel) {
+            const timeSpan = document.createElement("span");
+            timeSpan.className = "person-time";
+            timeSpan.textContent = durationLabel;
+            itemEl.appendChild(timeSpan);
+          }
 
           // notes
-          if ((person.notes && person.notes.length > 0) || checkoutLabel) {
+          if (person.notes && person.notes.length > 0) {
             const notesDiv = document.createElement("div");
             notesDiv.className = "person-notes";
-            if (checkoutLabel) {
-              const untilSpan = document.createElement("span");
-              untilSpan.className = "person-note";
-              untilSpan.textContent = `Here until ${checkoutLabel}`;
-              notesDiv.appendChild(untilSpan);
-            }
-            for (const note of (person.notes || [])) {
+            for (const note of person.notes) {
               const noteSpan = document.createElement("span");
               noteSpan.className = "person-note";
               const isSelf = note.from.toLowerCase() === person.name.toLowerCase();
