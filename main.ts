@@ -112,13 +112,14 @@ const normalizeStatus = (value: unknown): Status => {
 
 const kvPath = Deno.env.get("DENO_KV_PATH");
 const kv = await Deno.openKv(kvPath);
-const STATUS_KEY = ["status"];
+const STATUS_KEY_PREFIX = ["status"];
 const VAPID_KEYS_KV_KEY = ["vapid_keys"];
 const PUSH_SUB_PREFIX = ["push_subscriptions"];
 
 type VapidKeys = { publicKey: string; privateKey: string };
 type StoredSubscription = {
   name: string;
+  gym: string;
   subscription: { endpoint: string; keys: { p256dh: string; auth: string } };
 };
 
@@ -143,23 +144,23 @@ const vapidSubject = Deno.env.get("VAPID_SUBJECT") ?? "mailto:clymbe@example.com
 webpush.setVapidDetails(vapidSubject, vapidKeys.publicKey, vapidKeys.privateKey);
 
 const pushStore = {
-  async save(name: string, subscription: StoredSubscription["subscription"]): Promise<void> {
-    await kv.set([...PUSH_SUB_PREFIX, subscription.endpoint], { name, subscription });
+  async save(name: string, gym: string, subscription: StoredSubscription["subscription"]): Promise<void> {
+    await kv.set([...PUSH_SUB_PREFIX, gym, subscription.endpoint], { name, gym, subscription });
   },
-  async remove(endpoint: string): Promise<void> {
-    await kv.delete([...PUSH_SUB_PREFIX, endpoint]);
+  async remove(gym: string, endpoint: string): Promise<void> {
+    await kv.delete([...PUSH_SUB_PREFIX, gym, endpoint]);
   },
-  async getAll(): Promise<StoredSubscription[]> {
+  async getAllForGym(gym: string): Promise<StoredSubscription[]> {
     const entries: StoredSubscription[] = [];
-    for await (const entry of kv.list<StoredSubscription>({ prefix: PUSH_SUB_PREFIX })) {
+    for await (const entry of kv.list<StoredSubscription>({ prefix: [...PUSH_SUB_PREFIX, gym] })) {
       if (entry.value) entries.push(entry.value);
     }
     return entries;
   },
 };
 
-async function sendPresenceNotifications(name: string, message: string): Promise<void> {
-  const allSubs = await pushStore.getAll();
+async function sendPresenceNotifications(gym: string, name: string, message: string): Promise<void> {
+  const allSubs = await pushStore.getAllForGym(gym);
   const payload = JSON.stringify({
     title: "clymbe",
     body: message,
@@ -176,7 +177,7 @@ async function sendPresenceNotifications(name: string, message: string): Promise
           ? (err as { statusCode: number }).statusCode
           : 0;
         if (code === 410 || code === 404) {
-          await pushStore.remove(s.subscription.endpoint);
+          await pushStore.remove(gym, s.subscription.endpoint);
         } else {
           console.error(`push failed for ${s.name}:`, err);
         }
@@ -186,8 +187,8 @@ async function sendPresenceNotifications(name: string, message: string): Promise
   await Promise.allSettled(sends);
 }
 
-async function sendReactionNotification(reactorName: string, targetName: string): Promise<void> {
-  const allSubs = await pushStore.getAll();
+async function sendReactionNotification(gym: string, reactorName: string, targetName: string): Promise<void> {
+  const allSubs = await pushStore.getAllForGym(gym);
   const payload = JSON.stringify({
     title: "clymbe",
     body: `${reactorName} reacted to you`,
@@ -204,7 +205,7 @@ async function sendReactionNotification(reactorName: string, targetName: string)
           ? (err as { statusCode: number }).statusCode
           : 0;
         if (code === 410 || code === 404) {
-          await pushStore.remove(s.subscription.endpoint);
+          await pushStore.remove(gym, s.subscription.endpoint);
         } else {
           console.error(`push failed for ${s.name}:`, err);
         }
@@ -217,25 +218,31 @@ async function sendReactionNotification(reactorName: string, targetName: string)
 const ALLOWED_COLORS = ["#f9a8d4", "#a5b4fc", "#86efac", "#fde68a", "#c4b5fd"];
 
 const store = {
-  async read(): Promise<Status> {
-    const entry = await kv.get<Status>(STATUS_KEY);
+  async read(gym: string): Promise<Status> {
+    const entry = await kv.get<Status>([...STATUS_KEY_PREFIX, gym]);
     if (entry.value) {
       return normalizeStatus(entry.value);
     }
-    const initial = createStatus();
-    await kv.set(STATUS_KEY, initial);
+    const initial: Status = {
+      gym_name: gym,
+      people_here: [],
+      last_check_in: null,
+      check_in_count: 0,
+      updated_at: new Date().toISOString()
+    };
+    await kv.set([...STATUS_KEY_PREFIX, gym], initial);
     return initial;
   },
-  async write(status: Status): Promise<void> {
-    await kv.set(STATUS_KEY, status);
+  async write(gym: string, status: Status): Promise<void> {
+    await kv.set([...STATUS_KEY_PREFIX, gym], status);
   },
-  async setPresence(name: string, isHere: boolean, note?: string): Promise<Status> {
+  async setPresence(gym: string, name: string, isHere: boolean, note?: string): Promise<Status> {
     const normalizedName = normalizeName(name);
     if (normalizedName.length === 0) {
       throw new Error("name is required");
     }
 
-    const current = await this.read();
+    const current = await this.read(gym);
     const now = new Date().toISOString();
     const existingIndex = current.people_here.findIndex((person) =>
       namesEqual(person.name, normalizedName)
@@ -276,17 +283,17 @@ const store = {
       next.check_in_count = current.check_in_count + 1;
     }
 
-    await this.write(next);
+    await this.write(gym, next);
     return next;
   },
-  async addNote(targetName: string, fromName: string, text: string): Promise<Status> {
+  async addNote(gym: string, targetName: string, fromName: string, text: string): Promise<Status> {
     const normalizedTarget = normalizeName(targetName);
     const normalizedFrom = normalizeName(fromName);
     if (!normalizedTarget || !normalizedFrom || !text) {
       throw new Error("target, from, and text are required");
     }
 
-    const current = await this.read();
+    const current = await this.read(gym);
     const targetIndex = current.people_here.findIndex((p) =>
       namesEqual(p.name, normalizedTarget)
     );
@@ -310,14 +317,14 @@ const store = {
     peopleHere[targetIndex] = person;
 
     const next: Status = { ...current, people_here: peopleHere, updated_at: new Date().toISOString() };
-    await this.write(next);
+    await this.write(gym, next);
     return next;
   },
-  async addReaction(targetName: string, reactorName: string, emoji: string): Promise<Status> {
+  async addReaction(gym: string, targetName: string, reactorName: string, emoji: string): Promise<Status> {
     const normalizedTarget = normalizeName(targetName);
     const normalizedReactor = normalizeName(reactorName);
 
-    const current = await this.read();
+    const current = await this.read(gym);
     const targetIndex = current.people_here.findIndex((p) =>
       namesEqual(p.name, normalizedTarget)
     );
@@ -349,12 +356,18 @@ const store = {
     peopleHere[targetIndex] = person;
 
     const next: Status = { ...current, people_here: peopleHere, updated_at: new Date().toISOString() };
-    await this.write(next);
+    await this.write(gym, next);
     return next;
   },
-  async reset(): Promise<Status> {
-    const next = createStatus();
-    await this.write(next);
+  async reset(gym: string): Promise<Status> {
+    const next: Status = {
+      gym_name: gym,
+      people_here: [],
+      last_check_in: null,
+      check_in_count: 0,
+      updated_at: new Date().toISOString()
+    };
+    await this.write(gym, next);
     return next;
   }
 };
@@ -363,7 +376,8 @@ type Ctx = RouterContext<string>;
 const router = new Router();
 
 router.get("/api/status", async (ctx: Ctx) => {
-  ctx.response.body = await store.read();
+  const gym = ctx.request.url.searchParams.get("gym") || "Vital Lower East Side";
+  ctx.response.body = await store.read(gym);
 });
 
 router.post("/api/presence", async (ctx: Ctx) => {
@@ -393,10 +407,11 @@ router.post("/api/presence", async (ctx: Ctx) => {
     return;
   }
 
-  const payload = body as { name: string; is_here: boolean; note?: unknown };
+  const payload = body as { name: string; gym?: string; is_here: boolean; note?: unknown };
+  const gym = typeof payload.gym === "string" ? payload.gym : "Vital Lower East Side";
   const note = typeof payload.note === "string" ? payload.note.trim().slice(0, 60) : undefined;
   try {
-    const updatedStatus = await store.setPresence(payload.name, payload.is_here, note || undefined);
+    const updatedStatus = await store.setPresence(gym, payload.name, payload.is_here, note || undefined);
     ctx.response.body = updatedStatus;
 
     if (payload.is_here) {
@@ -404,7 +419,7 @@ router.post("/api/presence", async (ctx: Ctx) => {
       const msg = note
         ? `${name} checked in: "${note}"`
         : `${name} just checked in`;
-      sendPresenceNotifications(name, msg).catch((err) =>
+      sendPresenceNotifications(gym, name, msg).catch((err) =>
         console.error("push notification batch error:", err)
       );
     }
@@ -449,14 +464,15 @@ router.post("/api/react", async (ctx: Ctx) => {
     return;
   }
 
+  const gym = typeof b.gym === "string" ? b.gym : "Vital Lower East Side";
   const reactor = normalizeName(b.reactor as string);
   const target = normalizeName(b.target as string);
 
   try {
-    const updatedStatus = await store.addReaction(target, reactor, b.emoji as string);
+    const updatedStatus = await store.addReaction(gym, target, reactor, b.emoji as string);
     ctx.response.body = updatedStatus;
 
-    sendReactionNotification(reactor, target).catch((err) =>
+    sendReactionNotification(gym, reactor, target).catch((err) =>
       console.error("reaction notification error:", err)
     );
   } catch (error) {
@@ -494,6 +510,7 @@ router.post("/api/note", async (ctx: Ctx) => {
     return;
   }
 
+  const gym = typeof b.gym === "string" ? b.gym : "Vital Lower East Side";
   const from = normalizeName(b.from as string);
   const target = normalizeName(b.target as string);
   const text = (b.text as string).trim().slice(0, 60);
@@ -505,11 +522,11 @@ router.post("/api/note", async (ctx: Ctx) => {
   }
 
   try {
-    const updatedStatus = await store.addNote(target, from, text);
+    const updatedStatus = await store.addNote(gym, target, from, text);
     ctx.response.body = updatedStatus;
 
     if (!namesEqual(from, target)) {
-      sendReactionNotification(from, target).catch((err) =>
+      sendReactionNotification(gym, from, target).catch((err) =>
         console.error("note notification error:", err)
       );
     }
@@ -522,7 +539,8 @@ router.post("/api/note", async (ctx: Ctx) => {
 });
 
 router.post("/api/reset", async (ctx: Ctx) => {
-  ctx.response.body = await store.reset();
+  const gym = ctx.request.url.searchParams.get("gym") || "Vital Lower East Side";
+  ctx.response.body = await store.reset(gym);
 });
 
 router.get("/api/vapid-public-key", (ctx: Ctx) => {
@@ -552,6 +570,8 @@ router.post("/api/push/subscribe", async (ctx: Ctx) => {
     return;
   }
 
+  const gym = typeof b.gym === "string" ? b.gym : "Vital Lower East Side";
+
   const sub = b.subscription as Record<string, unknown> | undefined;
   if (
     !sub ||
@@ -565,7 +585,7 @@ router.post("/api/push/subscribe", async (ctx: Ctx) => {
     return;
   }
 
-  await pushStore.save(normalizeName(b.name as string), {
+  await pushStore.save(normalizeName(b.name as string), gym, {
     endpoint: sub.endpoint as string,
     keys: {
       p256dh: (sub.keys as Record<string, unknown>).p256dh as string,
@@ -599,7 +619,8 @@ router.post("/api/push/unsubscribe", async (ctx: Ctx) => {
     return;
   }
 
-  await pushStore.remove(b.endpoint as string);
+  const gym = typeof b.gym === "string" ? b.gym : "Vital Lower East Side";
+  await pushStore.remove(gym, b.endpoint as string);
   ctx.response.body = { unsubscribed: true };
 });
 

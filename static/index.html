@@ -121,6 +121,11 @@
         letter-spacing: -0.02em;
         color: var(--heading);
       }
+      select {
+        display: block;
+        margin-top: 0.75rem;
+        margin-bottom: 0.5rem;
+      }
       p {
         margin: 0.5rem 0 0;
         color: var(--text-muted);
@@ -132,7 +137,8 @@
         margin-top: 1.1rem;
         align-items: center;
       }
-      input[type="text"] {
+      input[type="text"],
+      select {
         border: 1px solid var(--input-border);
         border-radius: 10px;
         padding: 0.62rem 0.72rem;
@@ -145,10 +151,18 @@
       input[type="text"]::placeholder {
         color: var(--text-dim);
       }
-      input[type="text"]:focus {
+      input[type="text"]:focus,
+      select:focus {
         outline: none;
         border-color: var(--accent);
         box-shadow: 0 0 0 2px var(--accent-ring);
+      }
+      select {
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23a0a0c0' d='M1 4l5 4 5-4'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 0.5rem center;
+        padding-right: 1.75rem;
       }
       button {
         border: 1px solid var(--btn-primary-bg);
@@ -411,7 +425,10 @@
         <div class="header">
           <div>
             <h1>clymbe</h1>
-            <p>check in at vital lower east side.</p>
+            <select id="gymSelect">
+              <option value="Bouldering Project">Bouldering Project</option>
+              <option value="Vital Lower East Side">Vital Lower East Side</option>
+            </select>
             <p class="hint">enter your name, then toggle <strong>i'm here</strong>. get push notifications, leave notes, and pick colors.</p>
           </div>
           <div class="header-right">
@@ -442,6 +459,7 @@
       }
 
       const NAME_STORAGE_KEY = "clymbe_checkin_name";
+      const GYM_STORAGE_KEY = "clymbe_selected_gym";
       const THEME_KEY = "clymbe_theme";
       const NOTIF_PREF_KEY = "clymbe_notif_pref";
       const statusEl = document.getElementById("status");
@@ -454,6 +472,7 @@
       const resetEl = document.getElementById("reset");
       const themeToggleEl = document.getElementById("themeToggle");
       const notifToggleEl = document.getElementById("notifToggle");
+      const gymSelectEl = document.getElementById("gymSelect");
       const REACTION_COLORS = ["#f9a8d4", "#a5b4fc", "#86efac", "#fde68a", "#c4b5fd"];
 
       function hexToRgb(hex) {
@@ -490,6 +509,20 @@
         if (currentStatus) renderPeopleHere(currentStatus);
       });
 
+      // gym location selection
+      const getSelectedGym = () => gymSelectEl.value;
+      const setSelectedGym = (gym) => {
+        gymSelectEl.value = gym;
+        localStorage.setItem(GYM_STORAGE_KEY, gym);
+      };
+      const savedGym = localStorage.getItem(GYM_STORAGE_KEY);
+      if (savedGym) setSelectedGym(savedGym);
+      gymSelectEl.addEventListener("change", () => {
+        setSelectedGym(getSelectedGym());
+        syncCheckboxFromName();
+        loadStatus();
+      });
+
       const normalizeName = (name) => name.trim().replace(/\s+/g, " ");
 
       // push notification management
@@ -518,10 +551,11 @@
             applicationServerKey: urlBase64ToUint8Array(publicKey),
           });
           const name = normalizeName(nameInputEl.value);
+          const gym = getSelectedGym();
           await fetch("/api/push/subscribe", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ name, subscription: pushSubscription.toJSON() }),
+            body: JSON.stringify({ name, gym, subscription: pushSubscription.toJSON() }),
           });
           localStorage.setItem(NOTIF_PREF_KEY, "subscribed");
           return true;
@@ -536,11 +570,12 @@
         try {
           if (pushSubscription) {
             const endpoint = pushSubscription.endpoint;
+            const gym = getSelectedGym();
             await pushSubscription.unsubscribe();
             await fetch("/api/push/unsubscribe", {
               method: "POST",
               headers: { "content-type": "application/json" },
-              body: JSON.stringify({ endpoint }),
+              body: JSON.stringify({ gym, endpoint }),
             });
           }
           pushSubscription = null;
@@ -756,7 +791,8 @@
 
       const loadStatus = async () => {
         try {
-          const response = await fetch("/api/status");
+          const gym = getSelectedGym();
+          const response = await fetch(`/api/status?gym=${encodeURIComponent(gym)}`);
           const status = await response.json();
           currentStatus = status;
           syncCheckboxFromName();
@@ -803,10 +839,11 @@
           return;
         }
         try {
+          const gym = getSelectedGym();
           const response = await fetch("/api/react", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ reactor: myName, target: targetName, emoji: color }),
+            body: JSON.stringify({ gym, reactor: myName, target: targetName, emoji: color }),
           });
           if (!response.ok) {
             const errorBody = await response.json().catch(() => ({ message: "reaction failed" }));
@@ -825,10 +862,11 @@
           return;
         }
         try {
+          const gym = getSelectedGym();
           const response = await fetch("/api/note", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ from: myName, target: targetName, text }),
+            body: JSON.stringify({ gym, from: myName, target: targetName, text }),
           });
           if (!response.ok) {
             const errorBody = await response.json().catch(() => ({ message: "note failed" }));
@@ -858,11 +896,13 @@
         noteInputEl.disabled = true;
         try {
           const note = noteInputEl.value.trim().slice(0, 60);
+          const gym = getSelectedGym();
           const response = await fetch("/api/presence", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
               name,
+              gym,
               is_here: isHereEl.checked,
               ...(isHereEl.checked && note ? { note } : {}),
             }),
@@ -899,10 +939,11 @@
         syncCheckboxFromName();
         updateNotifButton();
         if (pushSubscription && value) {
+          const gym = getSelectedGym();
           fetch("/api/push/subscribe", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ name: value, subscription: pushSubscription.toJSON() }),
+            body: JSON.stringify({ name: value, gym, subscription: pushSubscription.toJSON() }),
           }).catch(() => {});
         }
       });
@@ -910,7 +951,8 @@
       refreshEl.addEventListener("click", loadStatus);
 
       resetEl.addEventListener("click", async () => {
-        await fetch("/api/reset", { method: "POST" });
+        const gym = getSelectedGym();
+        await fetch(`/api/reset?gym=${encodeURIComponent(gym)}`, { method: "POST" });
         messageEl.textContent = "reset complete";
         await loadStatus();
       });
