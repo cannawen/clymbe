@@ -308,6 +308,37 @@
         cursor: pointer;
         accent-color: var(--check-accent);
       }
+      .check-with-duration {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+      .duration-buttons {
+        display: flex;
+        gap: 0.35rem;
+      }
+      .duration-buttons .duration {
+        background: var(--btn-sec-bg);
+        color: var(--btn-sec-text);
+        border-color: var(--btn-sec-border);
+        padding: 0.5rem 0.65rem;
+        font-size: 0.9rem;
+        border-radius: 8px;
+        cursor: pointer;
+        border: 1px solid var(--btn-sec-border);
+        transition: background 0.15s, border-color 0.15s, color 0.15s;
+      }
+      .duration-buttons .duration:hover {
+        background: var(--btn-sec-hover);
+      }
+      .duration-buttons .duration:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .check-with-duration > span {
+        font-weight: 600;
+      }
       .people-title {
         margin: 1rem 0 0.35rem;
         font-weight: 600;
@@ -464,6 +495,7 @@
             <p class="hint">enter your name, then toggle <strong>i'm here</strong>. get push notifications, leave notes, and pick colors.</p>
           </div>
           <div class="header-right">
+            <button id="refresh" class="badge" aria-label="Refresh status">🔄</button>
             <button id="reset" class="badge">reset</button>
             <button id="notifToggle" aria-label="Toggle notifications" hidden>🔕</button>
             <button id="themeToggle" aria-label="Toggle theme">🌙</button>
@@ -472,11 +504,18 @@
         <div class="row">
           <input id="nameInput" type="text" placeholder="your name" autocomplete="name" />
           <input id="noteInput" type="text" placeholder="note (optional)" maxlength="60" />
-          <label class="check">
-            <input id="isHere" type="checkbox" />
-            i'm here
-          </label>
-          <button id="refresh" class="secondary">refresh</button>
+          <div class="check-with-duration">
+            <label class="check">
+              <input id="isHere" type="checkbox" />
+              i'm here for
+            </label>
+            <div class="duration-buttons">
+              <button class="duration" data-hours="1">1</button>
+              <button class="duration" data-hours="2">2</button>
+              <button class="duration" data-hours="3">3</button>
+            </div>
+            <span>hours</span>
+          </div>
         </div>
         <div id="message"></div>
         <div id="status">loading status...</div>
@@ -504,6 +543,7 @@
       const themeToggleEl = document.getElementById("themeToggle");
       const notifToggleEl = document.getElementById("notifToggle");
       const gymSelectEl = document.getElementById("gymSelect");
+      const durationButtonsEl = document.querySelectorAll(".duration-buttons .duration");
       const REACTION_COLORS = ["#f9a8d4", "#a5b4fc", "#86efac", "#fde68a", "#c4b5fd"];
 
       function hexToRgb(hex) {
@@ -982,6 +1022,53 @@
       });
 
       refreshEl.addEventListener("click", loadStatus);
+
+      durationButtonsEl.forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const hours = btn.getAttribute("data-hours");
+          const name = normalizeName(nameInputEl.value);
+          if (!name) {
+            messageEl.textContent = "enter your name first";
+            return;
+          }
+
+          isHereEl.disabled = true;
+          nameInputEl.disabled = true;
+          noteInputEl.disabled = true;
+          btn.disabled = true;
+
+          try {
+            const note = `I'm here for ${hours} hour${hours !== "1" ? "s" : ""}`;
+            const gym = getSelectedGym();
+            const response = await fetch("/api/presence", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                name,
+                gym,
+                is_here: true,
+                note,
+              }),
+            });
+            if (!response.ok) {
+              const errorBody = await response
+                .json()
+                .catch(() => ({ message: "presence update failed" }));
+              throw new Error(errorBody.message || "presence update failed");
+            }
+            messageEl.textContent = `${name} is now here for ${hours} hour${hours !== "1" ? "s" : ""}`;
+            celebrateCheckIn();
+          } catch (error) {
+            messageEl.textContent = error instanceof Error ? error.message : "presence update failed";
+          } finally {
+            isHereEl.disabled = false;
+            nameInputEl.disabled = false;
+            noteInputEl.disabled = false;
+            btn.disabled = false;
+            await loadStatus();
+          }
+        });
+      });
 
       resetEl.addEventListener("click", async () => {
         const gym = getSelectedGym();
