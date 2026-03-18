@@ -254,6 +254,13 @@
         font-weight: 700;
         transition: background 0.3s, border-color 0.3s, color 0.3s;
       }
+      button.badge {
+        cursor: pointer;
+      }
+      button.badge:hover {
+        background: var(--badge-bg);
+        border-color: var(--badge-border);
+      }
       #themeToggle {
         background: var(--toggle-bg);
         border: 1px solid var(--toggle-border);
@@ -457,7 +464,7 @@
             <p class="hint">enter your name, then toggle <strong>i'm here</strong>. get push notifications, leave notes, and pick colors.</p>
           </div>
           <div class="header-right">
-            <span class="badge">no login</span>
+            <button id="reset" class="badge">reset</button>
             <button id="notifToggle" aria-label="Toggle notifications" hidden>🔕</button>
             <button id="themeToggle" aria-label="Toggle theme">🌙</button>
           </div>
@@ -470,7 +477,6 @@
             i'm here
           </label>
           <button id="refresh" class="secondary">refresh</button>
-          <button id="reset" class="secondary">reset</button>
         </div>
         <div id="message"></div>
         <div id="status">loading status...</div>
