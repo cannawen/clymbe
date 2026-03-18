@@ -1,6 +1,6 @@
 # Clymbe Check-in
 
-Minimal check-in web app: type your name, toggle **I'm here**, and show who is currently at the gym.
+Minimal check-in web app: type your name, choose **1 / 2 / 3** hours to check in, and show who is currently at the gym.
 
 **Original** [clymbe.rocks](https://clymbe.rocks)
 **Live:** [https://climb.rcdis.co/](https://climb.rcdis.co/)
