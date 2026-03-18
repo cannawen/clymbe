@@ -3,7 +3,7 @@ import { Router, RouterContext } from "@oak/oak/router";
 import webpush from "web-push";
 
 const port = Number(Deno.env.get("PORT") ?? "5353");
-const gymName = Deno.env.get("CLYMBE_GYM_NAME") ?? "Vital Lower East Side";
+const gymName = Deno.env.get("DEFAULT_CLYMBE_GYM_NAME") ?? "Vital Lower East Side";
 
 type Note = { from: string; text: string };
 
@@ -376,7 +376,7 @@ type Ctx = RouterContext<string>;
 const router = new Router();
 
 router.get("/api/status", async (ctx: Ctx) => {
-  const gym = ctx.request.url.searchParams.get("gym") || "Vital Lower East Side";
+  const gym = ctx.request.url.searchParams.get("gym") || gymName;
   ctx.response.body = await store.read(gym);
 });
 
@@ -400,18 +400,18 @@ router.post("/api/presence", async (ctx: Ctx) => {
     typeof body !== "object" ||
     body === null ||
     typeof (body as Record<string, unknown>).name !== "string" ||
-    typeof (body as Record<string, unknown>).is_here !== "boolean"
+    typeof (body as Record<string, unknown>).is_here !== "boolean" ||
+    typeof (body as Record<string, unknown>).gym !== "string"
   ) {
     ctx.response.status = 400;
-    ctx.response.body = { message: "body must include string name and boolean is_here" };
+    ctx.response.body = { message: "body must include string gym, string name and boolean is_here" };
     return;
   }
 
-  const payload = body as { name: string; gym?: string; is_here: boolean; note?: unknown };
-  const gym = typeof payload.gym === "string" ? payload.gym : "Vital Lower East Side";
+  const payload = body as { name: string; gym: string; is_here: boolean; note?: unknown };
   const note = typeof payload.note === "string" ? payload.note.trim().slice(0, 60) : undefined;
   try {
-    const updatedStatus = await store.setPresence(gym, payload.name, payload.is_here, note || undefined);
+    const updatedStatus = await store.setPresence(payload.gym, payload.name, payload.is_here, note || undefined);
     ctx.response.body = updatedStatus;
 
     if (payload.is_here) {
@@ -419,7 +419,7 @@ router.post("/api/presence", async (ctx: Ctx) => {
       const msg = note
         ? `${name} checked in: "${note}"`
         : `${name} just checked in`;
-      sendPresenceNotifications(gym, name, msg).catch((err) =>
+      sendPresenceNotifications(payload.gym, name, msg).catch((err) =>
         console.error("push notification batch error:", err)
       );
     }
@@ -449,12 +449,13 @@ router.post("/api/react", async (ctx: Ctx) => {
 
   const b = body as Record<string, unknown>;
   if (
+    typeof b.gym !== "string" ||
     typeof b.reactor !== "string" ||
     typeof b.target !== "string" ||
     typeof b.emoji !== "string"
   ) {
     ctx.response.status = 400;
-    ctx.response.body = { message: "body must include string reactor, target, and emoji" };
+    ctx.response.body = { message: "body must include string gym, reactor, target, and emoji" };
     return;
   }
 
@@ -464,15 +465,14 @@ router.post("/api/react", async (ctx: Ctx) => {
     return;
   }
 
-  const gym = typeof b.gym === "string" ? b.gym : "Vital Lower East Side";
   const reactor = normalizeName(b.reactor as string);
   const target = normalizeName(b.target as string);
 
   try {
-    const updatedStatus = await store.addReaction(gym, target, reactor, b.emoji as string);
+    const updatedStatus = await store.addReaction(b.gym, target, reactor, b.emoji as string);
     ctx.response.body = updatedStatus;
 
-    sendReactionNotification(gym, reactor, target).catch((err) =>
+    sendReactionNotification(b.gym, reactor, target).catch((err) =>
       console.error("reaction notification error:", err)
     );
   } catch (error) {
@@ -503,14 +503,15 @@ router.post("/api/note", async (ctx: Ctx) => {
   if (
     typeof b.from !== "string" ||
     typeof b.target !== "string" ||
-    typeof b.text !== "string"
+    typeof b.text !== "string" ||
+    typeof b.gym !== "string"
   ) {
     ctx.response.status = 400;
     ctx.response.body = { message: "body must include string from, target, and text" };
     return;
   }
 
-  const gym = typeof b.gym === "string" ? b.gym : "Vital Lower East Side";
+  const gym = b.gym;
   const from = normalizeName(b.from as string);
   const target = normalizeName(b.target as string);
   const text = (b.text as string).trim().slice(0, 60);
@@ -539,7 +540,7 @@ router.post("/api/note", async (ctx: Ctx) => {
 });
 
 router.post("/api/reset", async (ctx: Ctx) => {
-  const gym = ctx.request.url.searchParams.get("gym") || "Vital Lower East Side";
+  const gym = ctx.request.url.searchParams.get("gym") || gymName;
   ctx.response.body = await store.reset(gym);
 });
 
@@ -564,13 +565,11 @@ router.post("/api/push/subscribe", async (ctx: Ctx) => {
   }
 
   const b = body as Record<string, unknown>;
-  if (typeof b.name !== "string" || !b.name.trim()) {
+  if (typeof b.name !== "string" || !b.name.trim() || b.gym !== "string") {
     ctx.response.status = 400;
     ctx.response.body = { message: "name is required" };
     return;
   }
-
-  const gym = typeof b.gym === "string" ? b.gym : "Vital Lower East Side";
 
   const sub = b.subscription as Record<string, unknown> | undefined;
   if (
@@ -585,7 +584,7 @@ router.post("/api/push/subscribe", async (ctx: Ctx) => {
     return;
   }
 
-  await pushStore.save(normalizeName(b.name as string), gym, {
+  await pushStore.save(normalizeName(b.name as string), b.gym, {
     endpoint: sub.endpoint as string,
     keys: {
       p256dh: (sub.keys as Record<string, unknown>).p256dh as string,
@@ -613,14 +612,15 @@ router.post("/api/push/unsubscribe", async (ctx: Ctx) => {
   }
 
   const b = body as Record<string, unknown>;
-  if (typeof b.endpoint !== "string") {
+  if (typeof b.endpoint !== "string" ||
+    typeof b.gym !== "string"
+  ) {
     ctx.response.status = 400;
     ctx.response.body = { message: "endpoint is required" };
     return;
   }
 
-  const gym = typeof b.gym === "string" ? b.gym : "Vital Lower East Side";
-  await pushStore.remove(gym, b.endpoint as string);
+  await pushStore.remove(b.gym, b.endpoint as string);
   ctx.response.body = { unsubscribed: true };
 });
 
