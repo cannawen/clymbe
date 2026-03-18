@@ -2,7 +2,8 @@
 
 Minimal check-in web app: type your name, toggle **I'm here**, and show who is currently at the gym.
 
-**Live:** [clymbe.rocks](https://clymbe.rocks) | [clymbe.rcdis.co](https://clymbe.rcdis.co)
+**Original** [clymbe.rocks](https://clymbe.rocks)
+**Live:** [https://climb.rcdis.co/](https://climb.rcdis.co/)
 
 ## Includes
 
@@ -31,7 +32,7 @@ Minimal check-in web app: type your name, toggle **I'm here**, and show who is c
 
 The app is deployed to two independent environments:
 
-- **[clymbe.rocks](https://clymbe.rocks)** — hosted on [Deno Deploy](https://deno.com/deploy). Deploys automatically on push to `main`.
+- ~~**[clymbe.rocks](https://clymbe.rocks)** — hosted on [Deno Deploy](https://deno.com/deploy). Deploys automatically on push to `main`.~~
 - **[clymbe.rcdis.co](https://clymbe.rcdis.co)** — hosted on the [Recurse Center](https://www.recurse.com/) community [Disco](https://letsdisco.dev/) server. Deploys automatically on push to `main` via Docker (`Dockerfile` + `disco.json`).
 
 Each deployment has its own Deno KV database — they do not share data.
