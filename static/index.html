@@ -649,8 +649,6 @@
             <h1 class="title-row">
               <span>clymbe @</span>
               <select id="gymSelect" class="title-select" aria-label="Select gym location">
-                <option value="vital lower east side">vital lower east side</option>
-                <option value="bouldering project">bouldering project</option>
               </select>
             </h1>
             <p class="hint">let everyone know you're clymbing. get push notifications, leave notes, and pick colors.</p>
@@ -675,8 +673,8 @@
         <div class="section-controls">
           <div id="message"></div>
           <div class="header-right">
-            <input id="newGymInput" type="text" placeholder="gym name" maxlength="60" hidden />
-            <button id="newGym" class="badge">new gym</button>
+            <input id="newGymInput" type="text" placeholder="add/remove gym" maxlength="60" hidden />
+            <button id="newGym" class="badge">modify gym list</button>
             <button id="reset" class="badge">reset</button>
             <button id="notifToggle" aria-label="Toggle notifications" hidden>🔕</button>
             <button id="themeToggle" aria-label="Toggle theme">🌙</button>
@@ -729,7 +727,7 @@
       const THEME_KEY = "clymbe_theme";
       const NOTIF_PREF_KEY = "clymbe_notif_pref";
       const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-      const DEFAULT_GYMS = ["vital lower east side", "bouldering project"];
+      const SEED_GYMS = ["vital lower east side", "bouldering project"];
       const statusEl = document.getElementById("status");
       const messageEl = document.getElementById("message");
       const peopleHereEl = document.getElementById("peopleHere");
@@ -782,26 +780,26 @@
       // gym location selection
       const getSelectedGym = () => gymSelectEl.value;
       const normalizeGymName = (gymName) => gymName.trim().replace(/\s+/g, " ").toLowerCase();
-      const getAllGyms = () => [...DEFAULT_GYMS, ...customGyms];
+      const getAllGyms = () => [...customGyms];
       const saveCustomGyms = () => {
         localStorage.setItem(CUSTOM_GYMS_STORAGE_KEY, JSON.stringify(customGyms));
       };
       const loadCustomGyms = () => {
         try {
           const saved = localStorage.getItem(CUSTOM_GYMS_STORAGE_KEY);
-          if (!saved) return [];
+          if (!saved) return [...SEED_GYMS];
           const parsed = JSON.parse(saved);
-          if (!Array.isArray(parsed)) return [];
+          if (!Array.isArray(parsed)) return [...SEED_GYMS];
           const unique = new Set();
           for (const gym of parsed) {
             if (typeof gym !== "string") continue;
             const normalized = normalizeGymName(gym);
-            if (!normalized || DEFAULT_GYMS.includes(normalized)) continue;
+            if (!normalized) continue;
             unique.add(normalized);
           }
           return [...unique];
         } catch {
-          return [];
+          return [...SEED_GYMS];
         }
       };
       const renderGymOptions = (selectedGym) => {
@@ -841,7 +839,7 @@
 
       const setNewGymMode = (isActive) => {
         addingGym = isActive;
-        newGymButtonEl.textContent = isActive ? "add gym" : "new gym";
+        newGymButtonEl.textContent = isActive ? "add/remove gym" : "modify gym list";
         newGymInputEl.hidden = !isActive;
         if (isActive) {
           newGymInputEl.focus();
@@ -857,9 +855,14 @@
           return;
         }
         if (getAllGyms().includes(normalizedGym)) {
-          setSelectedGym(normalizedGym);
+          const wasSelected = getSelectedGym() === normalizedGym;
+          customGyms = customGyms.filter((g) => g !== normalizedGym);
+          saveCustomGyms();
+          const fallback = getAllGyms()[0] ?? "";
+          renderGymOptions(wasSelected ? fallback : getSelectedGym());
+          if (wasSelected && fallback) setSelectedGym(fallback);
           setNewGymMode(false);
-          messageEl.textContent = "gym already exists";
+          messageEl.textContent = `removed gym: ${normalizedGym}`;
           await loadStatus();
           return;
         }
