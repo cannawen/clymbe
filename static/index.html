@@ -98,12 +98,16 @@
         background: var(--bg);
         color: var(--text);
         min-height: 100vh;
+        display: flex;
+        flex-direction: column;
         transition: background 0.3s, color 0.3s;
       }
       main {
         max-width: 860px;
         margin: 2.5rem auto 3rem;
         padding: 0 1rem 2rem;
+        width: 100%;
+        flex: 1 0 auto;
       }
       section {
         border: 1px solid var(--card-border);
@@ -240,8 +244,121 @@
       }
       .footer-controls {
         display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+        width: min(860px, 100%);
+        margin: 0 auto 1rem;
+        padding: 0 1rem;
+      }
+      .section-controls {
+        display: flex;
         justify-content: flex-end;
         margin-top: 1.25rem;
+      }
+      .footer-credit {
+        flex: 1 1 260px;
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+        min-width: 0;
+        color: var(--text);
+      }
+      .footer-credit::before,
+      .footer-credit::after {
+        content: "";
+        height: 1px;
+        flex: 1 1 64px;
+        min-width: 24px;
+        background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.95) 45%, rgba(255, 255, 255, 0.25) 100%);
+        box-shadow: 0 0 12px rgba(255, 255, 255, 0.7);
+      }
+      .footer-credit::after {
+        background: linear-gradient(90deg, rgba(255, 255, 255, 0.25) 0%, rgba(255, 255, 255, 0.95) 55%, transparent 100%);
+      }
+      .footer-credit-content {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.35rem;
+        white-space: nowrap;
+        color: var(--text);
+        font-size: 0.92rem;
+        line-height: 1;
+      }
+      .footer-credit-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: inherit;
+        text-decoration: none;
+      }
+      .footer-credit-link:hover {
+        color: var(--heading);
+      }
+      .footer-credit-text {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+      }
+      .footer-glow-target {
+        transition: color 0.18s ease, text-shadow 0.18s ease;
+      }
+      .footer-glow-target svg,
+      .footer-glow-target img,
+      .footer-glow-target iframe,
+      .footer-glow-target canvas {
+        transition: filter 0.18s ease;
+      }
+      .footer-glow-target:hover {
+        color: var(--heading);
+        text-shadow: 0 0 6px rgba(255, 255, 255, 0.75), 0 0 14px rgba(92, 224, 216, 0.6);
+      }
+      .footer-glow-target:hover svg,
+      .footer-glow-target:hover img,
+      .footer-glow-target:hover iframe,
+      .footer-glow-target:hover canvas {
+        filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.8)) drop-shadow(0 0 10px rgba(92, 224, 216, 0.65));
+      }
+      .footer-icon {
+        width: 1.2rem;
+        height: 1.2rem;
+        display: inline-block;
+        flex: 0 0 auto;
+      }
+      .footer-icon svg {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      .footer-scout {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        flex: 0 0 auto;
+        overflow: hidden;
+        line-height: 0;
+      }
+      .footer-scout > * {
+        width: 100% !important;
+        height: 100% !important;
+        display: block !important;
+      }
+      .footer-scout a,
+      .footer-scout img,
+      .footer-scout svg,
+      .footer-scout iframe {
+        width: 100% !important;
+        height: 100% !important;
+        max-width: 100% !important;
+        max-height: 100% !important;
+      }
+      .footer-scout img,
+      .footer-scout svg {
+        object-fit: contain;
       }
       @media (max-width: 640px) {
         .header {
@@ -251,7 +368,25 @@
           min-width: 100%;
         }
         .footer-controls {
+          justify-content: center;
+          margin-bottom: 0.75rem;
+        }
+        .section-controls {
           justify-content: flex-start;
+        }
+        .footer-credit {
+          flex-basis: 100%;
+          justify-content: center;
+          gap: 0.35rem;
+        }
+        .footer-credit::before,
+        .footer-credit::after {
+          display: none;
+        }
+        .footer-credit-content {
+          white-space: nowrap;
+          flex-wrap: nowrap;
+          gap: 0.2rem;
         }
       }
       .badge {
@@ -531,16 +666,49 @@
         <p class="people-title">people currently here</p>
         <ul id="peopleHere"></ul>
         <div id="status">loading status...</div>
-        <footer class="footer-controls">
+        <div class="section-controls">
           <div class="header-right">
-            <a class="badge" href="https://github.com/cannawen/clymbe" target="_blank" rel="noreferrer">src</a>
             <button id="reset" class="badge">reset</button>
             <button id="notifToggle" aria-label="Toggle notifications" hidden>🔕</button>
             <button id="themeToggle" aria-label="Toggle theme">🌙</button>
           </div>
-        </footer>
+        </div>
       </section>
     </main>
+    <footer class="footer-controls">
+      <div class="footer-credit" aria-label="Made with love at Recurse">
+        <div class="footer-credit-content">
+          <a
+            class="footer-credit-link footer-glow-target"
+            href="https://github.com/cannawen/clymbe"
+            title="github.com/cannawen/clymbe"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Source code on GitHub"
+          >
+            <span class="footer-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 8 4 12l4 4" />
+                <path d="m16 8 4 4-4 4" />
+                <path d="m14 4-4 16" />
+              </svg>
+            </span>
+          </a>
+          <span class="footer-credit-text">
+            <span>made with</span>
+            <span class="footer-icon footer-glow-target" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20.5 4.9 13.8a4.6 4.6 0 0 1 0-6.6 4.5 4.5 0 0 1 6.3 0L12 8l.8-.8a4.5 4.5 0 0 1 6.3 0 4.6 4.6 0 0 1 0 6.6Z" />
+              </svg>
+            </span>
+            <span>at</span>
+          </span>
+          <span class="footer-scout footer-glow-target" aria-label="Recurse Scout badge">
+            <script async defer src="https://www.recurse-scout.com/loader.js?t=f7a421ab4d533bda0997847d1d2cf661"></script>
+          </span>
+        </div>
+      </div>
+    </footer>
     <script>
       if ("serviceWorker" in navigator) {
         navigator.serviceWorker.register("/sw.js").catch(() => {});
