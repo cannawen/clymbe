@@ -1,6 +1,6 @@
 # Clymbe Check-in
 
-Minimal check-in web app: type your name, choose **1 / 2 / 3** hours to check in, and show who is currently at the gym.
+Minimal check-in web app: type your name, describe when you will arrive in plain English, and show who is currently at the gym plus scheduled future sessions.
 
 **Original** [clymbe.rocks](https://clymbe.rocks)
 **Live:** [https://climb.rcdis.co/](https://climb.rcdis.co/)
@@ -10,6 +10,7 @@ Minimal check-in web app: type your name, choose **1 / 2 / 3** hours to check in
 - Deno + Oak server (`main.ts`)
 - Static single-page UI (`static/index.html`)
 - Deno KV for persistence
+- Gemini-powered natural language parsing for scheduled sessions
 
 ## Run
 
@@ -18,6 +19,8 @@ Minimal check-in web app: type your name, choose **1 / 2 / 3** hours to check in
 
    ```bash
    cp .env.example .env
+
+   Add `GEMINI_API_KEY` in `.env` to enable natural-language session parsing.
    ```
 
 3. Start:
@@ -42,5 +45,8 @@ Each deployment has its own Deno KV database — they do not share data.
 - `GET /api/status`
 - `POST /api/presence`
   - body: `{ "name": "Your Name", "is_here": true | false }`
+- `POST /api/sessions/add`
+   - body: `{ "gym": "vital lower east side", "name": "Your Name", "session_details": "arriving in an hour climbing for 90m", "note": "optional", "timezone": "America/New_York", "now_iso": "2026-03-19T22:00:00.000Z" }`
+- `GET /api/sessions`
 - `POST /api/reset`
 - `GET /api/healthz`

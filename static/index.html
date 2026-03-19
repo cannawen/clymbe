@@ -451,36 +451,12 @@
         opacity: 0.35;
         cursor: not-allowed;
       }
-      .check-with-duration {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        flex-wrap: wrap;
+      #sessionDetailsInput {
+        min-width: 240px;
+        flex: 2;
       }
-      .duration-buttons {
-        display: flex;
-        gap: 0.35rem;
-      }
-      .duration-buttons .duration {
-        background: var(--btn-sec-bg);
-        color: var(--btn-sec-text);
-        border-color: var(--btn-sec-border);
-        padding: 0.5rem 0.65rem;
-        font-size: 0.9rem;
-        border-radius: 8px;
-        cursor: pointer;
-        border: 1px solid var(--btn-sec-border);
-        transition: background 0.15s, border-color 0.15s, color 0.15s;
-      }
-      .duration-buttons .duration:hover {
-        background: var(--btn-sec-hover);
-      }
-      .duration-buttons .duration:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-      .check-with-duration > span {
-        font-weight: 600;
+      #addSession {
+        min-width: 80px;
       }
       .people-title {
         margin: 1rem 0 0.35rem;
@@ -497,7 +473,41 @@
       #noteInput {
         min-width: 150px;
         flex: 1;
-        max-width: 240px;
+        max-width: 300px;
+      }
+      #scheduledSessions {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 0.45rem;
+      }
+      .session-item {
+        border: 1px solid var(--person-border);
+        border-radius: 10px;
+        background: var(--person-bg);
+        padding: 0.55rem 0.7rem;
+        display: grid;
+        gap: 0.2rem;
+      }
+      .session-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+      .session-name {
+        font-weight: 600;
+        color: var(--person-name);
+      }
+      .session-time {
+        color: var(--text-dim);
+        font-size: 0.82rem;
+      }
+      .session-details {
+        color: var(--text-muted);
+        font-size: 0.82rem;
       }
       #newGymInput {
         min-width: 180px;
@@ -651,24 +661,19 @@
               <select id="gymSelect" class="title-select" aria-label="Select gym location">
               </select>
             </h1>
-            <p class="hint">let everyone know you're clymbing. get push notifications, leave notes, and pick colors.</p>
+            <p class="hint">plan your climb in plain english, schedule future sessions, leave notes, and pick colors.</p>
           </div>
         </div>
         <div class="row">
           <input id="nameInput" type="text" placeholder="your name" autocomplete="name" />
+          <input id="sessionDetailsInput" type="text" placeholder="arriving in an hour climbing for 90m" maxlength="120" />
           <input id="noteInput" type="text" placeholder="note (optional)" maxlength="60" />
-          <div class="check-with-duration">
-            <span>i'm clymbing for</span>
-            <div class="duration-buttons">
-              <button class="duration" data-hours="1">1</button>
-              <button class="duration" data-hours="2">2</button>
-              <button class="duration" data-hours="3">3</button>
-            </div>
-            <span>hrs</span>
-          </div>
+          <button id="addSession">add</button>
         </div>
         <p class="people-title">people currently here</p>
         <ul id="peopleHere"></ul>
+        <p class="people-title">scheduled climbing sessions</p>
+        <ul id="scheduledSessions"></ul>
         <div id="status">loading status...</div>
         <div class="section-controls">
           <div id="message"></div>
@@ -731,15 +736,17 @@
       const statusEl = document.getElementById("status");
       const messageEl = document.getElementById("message");
       const peopleHereEl = document.getElementById("peopleHere");
+      const scheduledSessionsEl = document.getElementById("scheduledSessions");
       const nameInputEl = document.getElementById("nameInput");
+      const sessionDetailsInputEl = document.getElementById("sessionDetailsInput");
       const noteInputEl = document.getElementById("noteInput");
+      const addSessionEl = document.getElementById("addSession");
       const resetEl = document.getElementById("reset");
       const newGymInputEl = document.getElementById("newGymInput");
       const newGymButtonEl = document.getElementById("newGym");
       const themeToggleEl = document.getElementById("themeToggle");
       const notifToggleEl = document.getElementById("notifToggle");
       const gymSelectEl = document.getElementById("gymSelect");
-      const durationButtonsEl = document.querySelectorAll(".duration-buttons .duration");
       const REACTION_COLORS = ["#f9a8d4", "#a5b4fc", "#86efac", "#fde68a", "#c4b5fd"];
 
       function hexToRgb(hex) {
@@ -1060,10 +1067,68 @@
         [
           `gym_name: ${status.gym_name}`,
           `people_here_count: ${status.people_here.length}`,
+          `scheduled_sessions_count: ${(status.scheduled_sessions || []).length}`,
           `last_check_in: ${formatDateTime(status.last_check_in)}`,
           `check_in_count: ${status.check_in_count}`,
           `updated_at: ${formatDateTime(status.updated_at)}`,
         ].join("\n");
+
+      const formatSessionWindow = (startAt, endAt) => {
+        const startDate = new Date(startAt);
+        const endDate = new Date(endAt);
+        if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+          return "time unavailable";
+        }
+        const date = startDate.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+        const start = startDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        const end = endDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        return `${date} ${start} - ${end}`;
+      };
+
+      const renderScheduledSessions = (sessions) => {
+        scheduledSessionsEl.innerHTML = "";
+        if (!sessions || sessions.length === 0) {
+          const emptyEl = document.createElement("li");
+          emptyEl.className = "session-item";
+          emptyEl.textContent = "no future sessions yet";
+          scheduledSessionsEl.appendChild(emptyEl);
+          return;
+        }
+
+        for (const session of sessions) {
+          const item = document.createElement("li");
+          item.className = "session-item";
+
+          const head = document.createElement("div");
+          head.className = "session-head";
+
+          const name = document.createElement("span");
+          name.className = "session-name";
+          name.textContent = session.name;
+
+          const when = document.createElement("span");
+          when.className = "session-time";
+          when.textContent = formatSessionWindow(session.start_at, session.end_at);
+
+          head.appendChild(name);
+          head.appendChild(when);
+          item.appendChild(head);
+
+          const details = document.createElement("div");
+          details.className = "session-details";
+          details.textContent = session.details_text || session.standardized_details?.inferred_from_text || "scheduled session";
+          item.appendChild(details);
+
+          if (session.note) {
+            const note = document.createElement("div");
+            note.className = "session-details";
+            note.textContent = `note: ${session.note}`;
+            item.appendChild(note);
+          }
+
+          scheduledSessionsEl.appendChild(item);
+        }
+      };
 
       const renderPeopleHere = (status) => {
         peopleHereEl.innerHTML = "";
@@ -1194,8 +1259,9 @@
         }
       };
 
-      async function submitPresence(isHere, hours) {
+      async function submitSession() {
         const name = normalizeName(nameInputEl.value);
+        const sessionDetails = sessionDetailsInputEl.value.trim();
         const customNote = noteInputEl.value.trim();
         if (!name) {
           messageEl.textContent = "enter your name first";
@@ -1203,21 +1269,21 @@
         }
 
         nameInputEl.disabled = true;
+        sessionDetailsInputEl.disabled = true;
         noteInputEl.disabled = true;
-        durationButtonsEl.forEach((button) => {
-          button.disabled = true;
-        });
+        addSessionEl.disabled = true;
 
         try {
           const gym = getSelectedGym();
-          const response = await fetch("/api/presence", {
+          const response = await fetch("/api/sessions/add", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
               name,
               gym,
-              is_here: isHere,
-              ...(typeof hours === "number" ? { hours } : {}),
+              session_details: sessionDetails,
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+              now_iso: new Date().toISOString(),
               ...(customNote ? { note: customNote } : {}),
             }),
           });
@@ -1229,19 +1295,30 @@
             throw new Error(errorBody.message || "presence update failed");
           }
 
-          messageEl.textContent = isHere ? `${name} is now at ${gym}` : `${name} checked out`;
-          if (isHere) {
+          const payload = await response.json();
+          currentStatus = payload.status;
+          statusEl.textContent = formatStatus(payload.status);
+          renderPeopleHere(payload.status);
+          renderScheduledSessions(payload.status.scheduled_sessions || []);
+
+          if (payload.scheduled_session && payload.scheduled_session.status === "scheduled") {
+            messageEl.textContent = `${name} scheduled a future climbing session`;
+          } else {
+            messageEl.textContent = `${name} is now at ${gym}`;
             celebrateCheckIn();
+          }
+
+          if (!sessionDetails) {
+            sessionDetailsInputEl.value = "";
           }
         } catch (error) {
           messageEl.textContent =
             error instanceof Error ? error.message : "presence update failed";
         } finally {
           nameInputEl.disabled = false;
+          sessionDetailsInputEl.disabled = false;
           noteInputEl.disabled = false;
-          durationButtonsEl.forEach((button) => {
-            button.disabled = false;
-          });
+          addSessionEl.disabled = false;
           await loadStatus();
         }
       }
@@ -1254,6 +1331,7 @@
           currentStatus = status;
           statusEl.textContent = formatStatus(status);
           renderPeopleHere(status);
+          renderScheduledSessions(status.scheduled_sessions || []);
           if (!messageEl.textContent) {
             messageEl.textContent = "";
           }
@@ -1352,26 +1430,18 @@
         }
       });
 
-      const handleQuickCheckInEnter = async (event) => {
+      const handleSessionEnter = async (event) => {
         if (event.key !== "Enter" || event.isComposing) {
           return;
         }
         event.preventDefault();
-        await submitPresence(true, 1);
+        await submitSession();
       };
 
-      nameInputEl.addEventListener("keydown", handleQuickCheckInEnter);
-      noteInputEl.addEventListener("keydown", handleQuickCheckInEnter);
-
-      durationButtonsEl.forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          const hours = parseInt(btn.getAttribute("data-hours") || "0", 10);
-          if (hours <= 0) {
-            return;
-          }
-          await submitPresence(true, hours);
-        });
-      });
+      nameInputEl.addEventListener("keydown", handleSessionEnter);
+      sessionDetailsInputEl.addEventListener("keydown", handleSessionEnter);
+      noteInputEl.addEventListener("keydown", handleSessionEnter);
+      addSessionEl.addEventListener("click", submitSession);
 
       resetEl.addEventListener("click", async () => {
         const gym = getSelectedGym();

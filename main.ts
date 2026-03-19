@@ -27,6 +27,30 @@ type Status = {
   updated_at: string;
 };
 
+type StandardizedSessionDetails = {
+  arrival_time_iso: string;
+  duration_minutes: number;
+  inferred_from_text: string;
+};
+
+type ScheduledSessionStatus = "scheduled" | "checked_in" | "completed";
+
+type ScheduledSession = {
+  id: string;
+  gym: string;
+  name: string;
+  note?: string;
+  details_text: string;
+  standardized_details: StandardizedSessionDetails;
+  start_at: string;
+  end_at: string;
+  status: ScheduledSessionStatus;
+  created_at: string;
+  updated_at: string;
+  checked_in_at?: string;
+  checked_out_at?: string;
+};
+
 const createStatus = (): Status => ({
   gym_name: gymName,
   people_here: [],
@@ -129,8 +153,13 @@ const normalizeStatus = (value: unknown): Status => {
 const kvPath = Deno.env.get("DENO_KV_PATH");
 const kv = await Deno.openKv(kvPath);
 const STATUS_KEY_PREFIX = ["status"];
+const SCHEDULED_SESSION_KEY_PREFIX = ["scheduled_sessions"];
 const VAPID_KEYS_KV_KEY = ["vapid_keys"];
 const PUSH_SUB_PREFIX = ["push_subscriptions"];
+const SCHEDULE_REMINDER_SENT_PREFIX = ["schedule_reminder_sent"];
+
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")?.trim();
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL")?.trim() || "gemini-2.0-flash";
 
 type VapidKeys = { publicKey: string; privateKey: string };
 type StoredSubscription = {
@@ -158,6 +187,145 @@ const vapidKeys = await initVapid();
 const vapidSubject = Deno.env.get("VAPID_SUBJECT") ?? "mailto:clymbe@example.com";
 webpush.setVapidDetails(vapidSubject, vapidKeys.publicKey, vapidKeys.privateKey);
 
+const isValidIsoDate = (value: string): boolean => !Number.isNaN(new Date(value).getTime());
+
+const getLocalDateKey = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getTomorrowRange = (now: Date): { start: Date; end: Date } => {
+  const start = new Date(now);
+  start.setDate(start.getDate() + 1);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { start, end };
+};
+
+const sanitizeGeminiJson = (raw: string): string =>
+  raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+
+const buildGeminiPrompt = (input: {
+  sessionDetails: string;
+  nowIso: string;
+  timezone: string;
+}): string =>
+  [
+    "You convert natural language climbing session details into strict JSON.",
+    `Current timestamp ISO: ${input.nowIso}`,
+    `User timezone IANA: ${input.timezone}`,
+    `User text: ${input.sessionDetails}`,
+    "Output JSON ONLY with keys:",
+    "- arrival_time_iso (string, ISO timestamp)",
+    "- duration_minutes (positive integer)",
+    "- inferred_from_text (string, concise interpretation)",
+    "Rules:",
+    "- Resolve relative times against Current timestamp using provided timezone.",
+    "- If the user gives only arrival and no duration, default duration_minutes to 60.",
+    "- If the user gives only duration and no arrival, default arrival_time_iso to Current timestamp.",
+    "- Keep inferred_from_text short and factual.",
+  ].join("\n");
+
+async function parseSessionDetailsWithGemini(input: {
+  sessionDetails: string;
+  nowIso: string;
+  timezone: string;
+}): Promise<StandardizedSessionDetails> {
+  if (!GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY is not configured");
+  }
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: buildGeminiPrompt(input) }] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          temperature: 0.1,
+        },
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`gemini parse failed: ${response.status} ${errText}`);
+  }
+
+  const data = await response.json() as Record<string, unknown>;
+  const candidates = Array.isArray(data.candidates)
+    ? data.candidates as Array<Record<string, unknown>>
+    : [];
+  const first = candidates[0];
+  const content = first?.content as Record<string, unknown> | undefined;
+  const parts = Array.isArray(content?.parts) ? content?.parts as Array<Record<string, unknown>> : [];
+  const text = parts
+    .map((part) => (typeof part.text === "string" ? part.text : ""))
+    .join("\n")
+    .trim();
+
+  if (!text) {
+    throw new Error("gemini did not return parseable content");
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(sanitizeGeminiJson(text));
+  } catch {
+    throw new Error("gemini returned invalid JSON");
+  }
+
+  const arrival = typeof parsed.arrival_time_iso === "string"
+    ? parsed.arrival_time_iso
+    : "";
+  const duration = typeof parsed.duration_minutes === "number"
+    ? Math.floor(parsed.duration_minutes)
+    : NaN;
+  const interpreted = typeof parsed.inferred_from_text === "string"
+    ? parsed.inferred_from_text.trim()
+    : "";
+
+  if (!arrival || !isValidIsoDate(arrival)) {
+    throw new Error("unable to parse arrival time from session details");
+  }
+  if (!Number.isFinite(duration) || duration <= 0 || duration > 24 * 60) {
+    throw new Error("unable to parse a valid duration from session details");
+  }
+
+  return {
+    arrival_time_iso: new Date(arrival).toISOString(),
+    duration_minutes: duration,
+    inferred_from_text: interpreted || input.sessionDetails,
+  };
+}
+
+async function sendPushPayload(
+  gym: string,
+  target: StoredSubscription,
+  payload: string,
+): Promise<boolean> {
+  try {
+    await webpush.sendNotification(target.subscription, payload);
+    return true;
+  } catch (err: unknown) {
+    const code = err && typeof err === "object" && "statusCode" in err
+      ? (err as { statusCode: number }).statusCode
+      : 0;
+    if (code === 410 || code === 404) {
+      await pushStore.remove(gym, target.subscription.endpoint);
+    } else {
+      console.error(`push failed for ${target.name}:`, err);
+    }
+    return false;
+  }
+}
+
 const pushStore = {
   async save(name: string, gym: string, subscription: StoredSubscription["subscription"]): Promise<void> {
     const normalizedGym = normalizeGym(gym);
@@ -178,63 +346,74 @@ const pushStore = {
     }
     return entries;
   },
+  async listGyms(): Promise<string[]> {
+    const gyms = new Set<string>();
+    for await (const entry of kv.list<StoredSubscription>({ prefix: PUSH_SUB_PREFIX })) {
+      const key = entry.key;
+      if (Array.isArray(key) && typeof key[1] === "string") {
+        gyms.add(normalizeGym(key[1]));
+      }
+    }
+    return [...gyms];
+  },
 };
 
-async function sendPresenceNotifications(gym: string, name: string, message: string): Promise<void> {
-  const allSubs = await pushStore.getAllForGym(gym);
-  const payload = JSON.stringify({
-    title: "clymbe",
-    body: message,
-    url: "/",
-  });
-
-  const sends = allSubs
-    .filter((s) => !namesEqual(s.name, name))
-    .map(async (s) => {
-      try {
-        await webpush.sendNotification(s.subscription, payload);
-      } catch (err: unknown) {
-        const code = err && typeof err === "object" && "statusCode" in err
-          ? (err as { statusCode: number }).statusCode
-          : 0;
-        if (code === 410 || code === 404) {
-          await pushStore.remove(gym, s.subscription.endpoint);
-        } else {
-          console.error(`push failed for ${s.name}:`, err);
-        }
-      }
+const sessionStore = {
+  async write(session: ScheduledSession): Promise<void> {
+    await kv.set(
+      [...SCHEDULED_SESSION_KEY_PREFIX, normalizeGym(session.gym), session.id],
+      {
+        ...session,
+        gym: normalizeGym(session.gym),
+        name: normalizeName(session.name),
+      },
+    );
+  },
+  async listAll(gym: string): Promise<ScheduledSession[]> {
+    const normalizedGym = normalizeGym(gym);
+    const sessions: ScheduledSession[] = [];
+    for await (
+      const entry of kv.list<ScheduledSession>({
+        prefix: [...SCHEDULED_SESSION_KEY_PREFIX, normalizedGym],
+      })
+    ) {
+      if (!entry.value) continue;
+      const value = entry.value;
+      if (!value.id || !value.name || !value.start_at || !value.end_at) continue;
+      sessions.push({
+        ...value,
+        gym: normalizedGym,
+        name: normalizeName(value.name),
+      });
+    }
+    sessions.sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+    return sessions;
+  },
+  async listFuture(gym: string, now = new Date()): Promise<ScheduledSession[]> {
+    const sessions = await this.listAll(gym);
+    const nowTs = now.getTime();
+    return sessions.filter((session) =>
+      session.status === "scheduled" && new Date(session.start_at).getTime() > nowTs
+    );
+  },
+  async listScheduledForNameInRange(
+    gym: string,
+    name: string,
+    start: Date,
+    end: Date,
+  ): Promise<ScheduledSession[]> {
+    const normalizedName = normalizeName(name);
+    const startTs = start.getTime();
+    const endTs = end.getTime();
+    const sessions = await this.listAll(gym);
+    return sessions.filter((session) => {
+      if (session.status !== "scheduled") return false;
+      if (!namesEqual(session.name, normalizedName)) return false;
+      const ts = new Date(session.start_at).getTime();
+      return ts >= startTs && ts < endTs;
     });
-
-  await Promise.allSettled(sends);
-}
-
-async function sendReactionNotification(gym: string, reactorName: string, targetName: string): Promise<void> {
-  const allSubs = await pushStore.getAllForGym(gym);
-  const payload = JSON.stringify({
-    title: "clymbe",
-    body: `${reactorName} reacted to you`,
-    url: "/",
-  });
-
-  const sends = allSubs
-    .filter((s) => namesEqual(s.name, targetName))
-    .map(async (s) => {
-      try {
-        await webpush.sendNotification(s.subscription, payload);
-      } catch (err: unknown) {
-        const code = err && typeof err === "object" && "statusCode" in err
-          ? (err as { statusCode: number }).statusCode
-          : 0;
-        if (code === 410 || code === 404) {
-          await pushStore.remove(gym, s.subscription.endpoint);
-        } else {
-          console.error(`push failed for ${s.name}:`, err);
-        }
-      }
-    });
-
-  await Promise.allSettled(sends);
-}
+  },
+};
 
 const ALLOWED_COLORS = ["#f9a8d4", "#a5b4fc", "#86efac", "#fde68a", "#c4b5fd"];
 
@@ -262,7 +441,13 @@ const store = {
       gym_name: normalizeGym(status.gym_name)
     });
   },
-  async setPresence(gym: string, name: string, isHere: boolean, note?: string, hours?: number): Promise<Status> {
+  async setPresence(
+    gym: string,
+    name: string,
+    isHere: boolean,
+    note?: string,
+    options?: { hours?: number; checkoutAtIso?: string; checkedInAtIso?: string },
+  ): Promise<Status> {
     const normalizedName = normalizeName(name);
     if (normalizedName.length === 0) {
       throw new Error("name is required");
@@ -276,13 +461,19 @@ const store = {
 
     const peopleHere = [...current.people_here];
     const checkoutAt =
-      hours && hours > 0
-        ? new Date(new Date(now).getTime() + hours * 60 * 60 * 1000).toISOString()
+      options?.checkoutAtIso && isValidIsoDate(options.checkoutAtIso)
+        ? new Date(options.checkoutAtIso).toISOString()
+        : options?.hours && options.hours > 0
+        ? new Date(new Date(now).getTime() + options.hours * 60 * 60 * 1000).toISOString()
         : undefined;
     const presenceNote = buildPresenceNote(note);
+    const effectiveCheckedInAt =
+      options?.checkedInAtIso && isValidIsoDate(options.checkedInAtIso)
+        ? new Date(options.checkedInAtIso).toISOString()
+        : now;
 
     if (isHere && existingIndex === -1) {
-      const entry: PersonHere = { name: normalizedName, checked_in_at: now };
+      const entry: PersonHere = { name: normalizedName, checked_in_at: effectiveCheckedInAt };
       if (presenceNote) entry.notes = [{ from: normalizedName, text: presenceNote }];
       if (checkoutAt) entry.checkout_at = checkoutAt;
       peopleHere.push(entry);
@@ -436,8 +627,11 @@ const router = new Router();
 
 router.get("/api/status", async (ctx: Ctx) => {
   const gym = normalizeGym(ctx.request.url.searchParams.get("gym") || gymName);
+  await processScheduledSessionsForGym(gym);
   await store.autoCheckout(gym);
-  ctx.response.body = await store.read(gym);
+  const status = await store.read(gym);
+  const scheduledSessions = await sessionStore.listFuture(gym);
+  ctx.response.body = { ...status, scheduled_sessions: scheduledSessions };
 });
 
 router.post("/api/presence", async (ctx: Ctx) => {
@@ -472,21 +666,17 @@ router.post("/api/presence", async (ctx: Ctx) => {
   const gym = normalizeGym(payload.gym);
   const note = typeof payload.note === "string" ? payload.note.trim() : undefined;
   try {
-    const hours = typeof (body as Record<string, unknown>).hours === "number" 
+    const hours = typeof (body as Record<string, unknown>).hours === "number"
       ? (body as Record<string, unknown>).hours as number
       : undefined;
-    const updatedStatus = await store.setPresence(gym, payload.name, payload.is_here, note || undefined, hours);
+    const updatedStatus = await store.setPresence(
+      gym,
+      payload.name,
+      payload.is_here,
+      note || undefined,
+      { hours },
+    );
     ctx.response.body = updatedStatus;
-
-    if (payload.is_here) {
-      const name = normalizeName(payload.name);
-      const msg = note
-        ? `${name} checked in: "${note}"`
-        : `${name} just checked in`;
-      sendPresenceNotifications(gym, name, msg).catch((err) =>
-        console.error("push notification batch error:", err)
-      );
-    }
   } catch (error) {
     ctx.response.status = 400;
     ctx.response.body = {
@@ -537,10 +727,6 @@ router.post("/api/react", async (ctx: Ctx) => {
   try {
     const updatedStatus = await store.addReaction(gym, target, reactor, b.emoji as string);
     ctx.response.body = updatedStatus;
-
-    sendReactionNotification(gym, reactor, target).catch((err) =>
-      console.error("reaction notification error:", err)
-    );
   } catch (error) {
     ctx.response.status = 400;
     ctx.response.body = {
@@ -591,12 +777,6 @@ router.post("/api/note", async (ctx: Ctx) => {
   try {
     const updatedStatus = await store.addNote(gym, target, from, text);
     ctx.response.body = updatedStatus;
-
-    if (!namesEqual(from, target)) {
-      sendReactionNotification(gym, from, target).catch((err) =>
-        console.error("note notification error:", err)
-      );
-    }
   } catch (error) {
     ctx.response.status = 400;
     ctx.response.body = {
@@ -690,9 +870,237 @@ router.post("/api/push/unsubscribe", async (ctx: Ctx) => {
   ctx.response.body = { unsubscribed: true };
 });
 
+router.get("/api/sessions", async (ctx: Ctx) => {
+  const gym = normalizeGym(ctx.request.url.searchParams.get("gym") || gymName);
+  await processScheduledSessionsForGym(gym);
+  ctx.response.body = { sessions: await sessionStore.listFuture(gym) };
+});
+
+router.post("/api/sessions/add", async (ctx: Ctx) => {
+  if (!ctx.request.hasBody) {
+    ctx.response.status = 400;
+    ctx.response.body = { message: "body required" };
+    return;
+  }
+
+  let body: unknown;
+  try {
+    body = await ctx.request.body.json();
+  } catch {
+    ctx.response.status = 400;
+    ctx.response.body = { message: "invalid json body" };
+    return;
+  }
+
+  const b = body as Record<string, unknown>;
+  if (typeof b.gym !== "string" || typeof b.name !== "string") {
+    ctx.response.status = 400;
+    ctx.response.body = { message: "body must include string gym and string name" };
+    return;
+  }
+
+  const gym = normalizeGym(b.gym as string);
+  const name = normalizeName(b.name as string);
+  const note = typeof b.note === "string" ? b.note.trim() : "";
+  const sessionDetails = typeof b.session_details === "string" ? b.session_details.trim() : "";
+  const nowIsoInput = typeof b.now_iso === "string" && isValidIsoDate(b.now_iso)
+    ? new Date(b.now_iso).toISOString()
+    : new Date().toISOString();
+  const timezone = typeof b.timezone === "string" && b.timezone.trim()
+    ? b.timezone.trim()
+    : "UTC";
+
+  if (!name) {
+    ctx.response.status = 400;
+    ctx.response.body = { message: "name is required" };
+    return;
+  }
+
+  try {
+    if (!sessionDetails) {
+      const start = new Date(nowIsoInput);
+      const end = new Date(start.getTime() + 60 * 60 * 1000);
+      const status = await store.setPresence(gym, name, true, note || undefined, {
+        checkoutAtIso: end.toISOString(),
+        checkedInAtIso: start.toISOString(),
+      });
+      ctx.response.body = {
+        status,
+        scheduled_session: null,
+        standardized_details: {
+          arrival_time_iso: start.toISOString(),
+          duration_minutes: 60,
+          inferred_from_text: "no session details provided; defaulted to 60 minutes",
+        },
+      };
+      return;
+    }
+
+    const standardizedDetails = await parseSessionDetailsWithGemini({
+      sessionDetails,
+      nowIso: nowIsoInput,
+      timezone,
+    });
+
+    const sessionStart = new Date(standardizedDetails.arrival_time_iso);
+    const sessionEnd = new Date(
+      sessionStart.getTime() + standardizedDetails.duration_minutes * 60 * 1000,
+    );
+    const now = new Date(nowIsoInput);
+    if (sessionEnd.getTime() <= now.getTime()) {
+      throw new Error("session end time must be in the future");
+    }
+
+    const createdAt = new Date().toISOString();
+    const id = crypto.randomUUID();
+
+    const session: ScheduledSession = {
+      id,
+      gym,
+      name,
+      ...(note ? { note } : {}),
+      details_text: sessionDetails,
+      standardized_details: standardizedDetails,
+      start_at: sessionStart.toISOString(),
+      end_at: sessionEnd.toISOString(),
+      status: sessionStart.getTime() <= now.getTime() ? "checked_in" : "scheduled",
+      created_at: createdAt,
+      updated_at: createdAt,
+    };
+
+    if (session.status === "checked_in") {
+      const updatedStatus = await store.setPresence(gym, name, true, note || undefined, {
+        checkoutAtIso: session.end_at,
+        checkedInAtIso: now.toISOString(),
+      });
+      session.checked_in_at = now.toISOString();
+      await sessionStore.write(session);
+      ctx.response.body = {
+        status: updatedStatus,
+        scheduled_session: session,
+        standardized_details: standardizedDetails,
+      };
+      return;
+    }
+
+    await sessionStore.write(session);
+    await processScheduledSessionsForGym(gym);
+    const status = await store.read(gym);
+    ctx.response.body = {
+      status,
+      scheduled_session: session,
+      standardized_details: standardizedDetails,
+    };
+  } catch (error) {
+    ctx.response.status = 400;
+    ctx.response.body = {
+      message: error instanceof Error ? error.message : "invalid request",
+    };
+  }
+});
+
 router.get("/api/healthz", (ctx: Ctx) => {
   ctx.response.body = { ok: true };
 });
+
+async function processScheduledSessionsForGym(gym: string): Promise<void> {
+  const sessions = await sessionStore.listAll(gym);
+  const now = new Date();
+  const nowTs = now.getTime();
+
+  for (const session of sessions) {
+    const startTs = new Date(session.start_at).getTime();
+    const endTs = new Date(session.end_at).getTime();
+
+    if (session.status === "scheduled" && startTs <= nowTs) {
+      await store.setPresence(gym, session.name, true, session.note, {
+        checkoutAtIso: session.end_at,
+        checkedInAtIso: new Date(Math.max(startTs, nowTs)).toISOString(),
+      });
+      session.status = "checked_in";
+      session.checked_in_at = now.toISOString();
+      session.updated_at = new Date().toISOString();
+      await sessionStore.write(session);
+    }
+
+    if (session.status === "checked_in" && endTs <= nowTs) {
+      await store.setPresence(gym, session.name, false);
+      session.status = "completed";
+      session.checked_out_at = now.toISOString();
+      session.updated_at = new Date().toISOString();
+      await sessionStore.write(session);
+    }
+  }
+}
+
+async function listKnownGyms(): Promise<string[]> {
+  const gyms = new Set<string>([gymName]);
+
+  for await (const entry of kv.list({ prefix: STATUS_KEY_PREFIX })) {
+    if (Array.isArray(entry.key) && typeof entry.key[1] === "string") {
+      gyms.add(normalizeGym(entry.key[1]));
+    }
+  }
+
+  for await (const entry of kv.list({ prefix: SCHEDULED_SESSION_KEY_PREFIX })) {
+    if (Array.isArray(entry.key) && typeof entry.key[1] === "string") {
+      gyms.add(normalizeGym(entry.key[1]));
+    }
+  }
+
+  const pushGyms = await pushStore.listGyms();
+  for (const gym of pushGyms) {
+    gyms.add(normalizeGym(gym));
+  }
+
+  return [...gyms];
+}
+
+async function sendTomorrowScheduleReminders(): Promise<void> {
+  const now = new Date();
+  if (now.getHours() !== 19) {
+    return;
+  }
+
+  const localDateKey = getLocalDateKey(now);
+  const { start: tomorrowStart, end: tomorrowEnd } = getTomorrowRange(now);
+  const gyms = await listKnownGyms();
+
+  for (const gym of gyms) {
+    const subscriptions = await pushStore.getAllForGym(gym);
+    if (subscriptions.length === 0) continue;
+
+    for (const sub of subscriptions) {
+      const reminderKey = [
+        ...SCHEDULE_REMINDER_SENT_PREFIX,
+        normalizeGym(gym),
+        localDateKey,
+        sub.subscription.endpoint,
+      ];
+      const sent = await kv.get<boolean>(reminderKey);
+      if (sent.value) continue;
+
+      const sessions = await sessionStore.listScheduledForNameInRange(
+        gym,
+        sub.name,
+        tomorrowStart,
+        tomorrowEnd,
+      );
+      if (sessions.length === 0) continue;
+
+      const payload = JSON.stringify({
+        title: "clymbe",
+        body: `You have ${sessions.length} scheduled climbing session${sessions.length === 1 ? "" : "s"} tomorrow at ${gym}.`,
+        url: "/",
+      });
+
+      const sentOk = await sendPushPayload(gym, sub, payload);
+      if (sentOk) {
+        await kv.set(reminderKey, true);
+      }
+    }
+  }
+}
 
 const app = new Application();
 
@@ -721,13 +1129,17 @@ app.use(async (ctx) => {
   }
 });
 
-// Auto-checkout cleanup task - runs every 30 seconds.
+// Background scheduler for check-in/out lifecycle and reminder sends.
 setInterval(async () => {
   try {
-    const gyms = ["vital lower east side", "bouldering project"];
-    await Promise.all(gyms.map((gym) => store.autoCheckout(gym)));
+    const gyms = await listKnownGyms();
+    await Promise.all(gyms.map(async (gym) => {
+      await processScheduledSessionsForGym(gym);
+      await store.autoCheckout(gym);
+    }));
+    await sendTomorrowScheduleReminders();
   } catch (error) {
-    console.error("auto-checkout cleanup error:", error);
+    console.error("background scheduler error:", error);
   }
 }, 30000);
 
