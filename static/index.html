@@ -52,6 +52,11 @@
         --toggle-bg: rgba(255, 255, 255, 0.08);
         --toggle-border: rgba(255, 255, 255, 0.15);
         --toggle-text: #f0f0f8;
+        --sparkle-1: #f28c5a;
+        --sparkle-2: #5ce0d8;
+        --sparkle-3: #c4b5fd;
+        --sparkle-4: #f5a070;
+        --sparkle-5: #8b5cf6;
       }
 
       /* -- light theme -- */
@@ -90,6 +95,11 @@
         --toggle-bg: rgba(255, 255, 255, 0.6);
         --toggle-border: rgba(139, 92, 246, 0.2);
         --toggle-text: #2d1f3d;
+        --sparkle-1: #e87a48;
+        --sparkle-2: #0d9488;
+        --sparkle-3: #7c3aed;
+        --sparkle-4: #f28c5a;
+        --sparkle-5: #a855f7;
       }
 
       body {
@@ -110,6 +120,8 @@
         flex: 1 0 auto;
       }
       section {
+        position: relative;
+        overflow: hidden;
         border: 1px solid var(--card-border);
         border-radius: 16px;
         padding: 1.2rem;
@@ -245,6 +257,48 @@
         align-items: flex-end;
         gap: 1rem;
       }
+      .ai-ribbon {
+        position: absolute;
+        top: 1.45rem;
+        right: -4.35rem;
+        transform: rotate(45deg);
+        transform-origin: center;
+        background: linear-gradient(
+          100deg,
+          var(--sparkle-1) 0%,
+          var(--sparkle-2) 25%,
+          var(--sparkle-3) 50%,
+          var(--sparkle-4) 75%,
+          var(--sparkle-5) 100%
+        );
+        background-size: 240% 100%;
+        animation: ai-ribbon-color-shift 7s ease-in-out infinite alternate;
+        color: #5a1f00;
+        border: 2px solid rgba(255, 255, 255, 0.75);
+        box-shadow: 0 0 0 2px rgba(255, 140, 66, 0.35), 0 10px 20px rgba(0, 0, 0, 0.28);
+        font-size: 0.74rem;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        padding: 0.38rem 2.2rem 0.38rem 6.2rem;
+        text-shadow: 0 1px 0 rgba(255, 255, 255, 0.55);
+        pointer-events: none;
+        user-select: none;
+        z-index: 3;
+      }
+      .ai-ribbon::before,
+      .ai-ribbon::after {
+        content: "✨";
+        margin: 0 0.35rem;
+      }
+      @keyframes ai-ribbon-color-shift {
+        0% {
+          background-position: 0% 50%;
+        }
+        100% {
+          background-position: 100% 50%;
+        }
+      }
       .header-right {
         display: flex;
         align-items: center;
@@ -371,6 +425,22 @@
         object-fit: contain;
       }
       @media (max-width: 640px) {
+        .ai-ribbon {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          width: 100%;
+          transform: none;
+          font-size: 0.66rem;
+          text-align: center;
+          letter-spacing: 0.14em;
+          padding: 0.36rem 0.8rem;
+          border-left: 0;
+          border-right: 0;
+          border-radius: 0;
+          box-shadow: 0 3px 12px rgba(0, 0, 0, 0.24);
+        }
         .header {
           align-items: flex-start;
         }
@@ -684,6 +754,7 @@
   <body>
     <main>
       <section>
+        <div class="ai-ribbon" aria-hidden="true">powered by ai</div>
         <div class="header">
           <div>
             <h1 class="title-row">
@@ -711,7 +782,6 @@
           <div class="header-right">
             <input id="newGymInput" type="text" placeholder="add/remove gym" maxlength="60" hidden />
             <button id="newGym" class="badge">modify gym list</button>
-            <button id="reset" class="badge">reset</button>
             <button id="notifToggle" aria-label="Toggle notifications" hidden>🔕</button>
             <button id="themeToggle" aria-label="Toggle theme">🌙</button>
           </div>
@@ -772,7 +842,6 @@
       const sessionDetailsInputEl = document.getElementById("sessionDetailsInput");
       const noteInputEl = document.getElementById("noteInput");
       const addSessionEl = document.getElementById("addSession");
-      const resetEl = document.getElementById("reset");
       const newGymInputEl = document.getElementById("newGymInput");
       const newGymButtonEl = document.getElementById("newGym");
       const themeToggleEl = document.getElementById("themeToggle");
@@ -1571,13 +1640,6 @@
       sessionDetailsInputEl.addEventListener("keydown", handleSessionEnter);
       noteInputEl.addEventListener("keydown", handleSessionEnter);
       addSessionEl.addEventListener("click", submitSession);
-
-      resetEl.addEventListener("click", async () => {
-        const gym = getSelectedGym();
-        await fetch(`/api/reset?gym=${encodeURIComponent(gym)}`, { method: "POST" });
-        messageEl.textContent = "reset complete";
-        await loadStatus();
-      });
 
       const savedName = window.localStorage.getItem(NAME_STORAGE_KEY);
       if (savedName) {
