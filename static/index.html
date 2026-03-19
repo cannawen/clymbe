@@ -133,6 +133,15 @@
         gap: 0.6rem;
         flex-wrap: wrap;
       }
+      .title-at {
+        font-size: 2rem;
+        font-weight: 600;
+        line-height: 1;
+        display: inline-flex;
+        align-items: center;
+        min-height: calc(1em + 1.24rem + 2px);
+        transform: translateY(0.1em);
+      }
       select {
         display: block;
         margin-top: 0.75rem;
@@ -678,7 +687,8 @@
         <div class="header">
           <div>
             <h1 class="title-row">
-              <span>clymbe @</span>
+              <span>clymbe</span>
+              <span class="title-at">@</span>
               <select id="gymSelect" class="title-select" aria-label="Select gym location">
               </select>
             </h1>
@@ -686,8 +696,8 @@
           </div>
         </div>
         <div class="row">
-          <input id="nameInput" type="text" placeholder="your name" autocomplete="name" />
-          <input id="sessionDetailsInput" type="text" placeholder="arriving in an hour climbing for 90m" maxlength="120" />
+          <input id="nameInput" type="text" placeholder="name" autocomplete="name" />
+          <input id="sessionDetailsInput" type="text" placeholder="friday 9:30 (optional)" maxlength="120" />
           <input id="noteInput" type="text" placeholder="note (optional)" maxlength="60" />
           <button id="addSession">add</button>
         </div>
