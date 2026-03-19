@@ -768,8 +768,8 @@
         </div>
         <div class="row">
           <input id="nameInput" type="text" placeholder="name" autocomplete="name" />
-          <input id="sessionDetailsInput" type="text" placeholder="friday 9:30 for 2h (optional)" maxlength="120" />
-          <input id="noteInput" type="text" placeholder="note (optional)" maxlength="60" />
+          <input id="sessionDetailsInput" type="text" placeholder="friday 9:30 for 2h (optional)" />
+          <input id="noteInput" type="text" placeholder="note (optional)" />
           <button id="addSession">add</button>
         </div>
         <p class="people-title">people currently here</p>
@@ -780,7 +780,7 @@
         <div class="section-controls">
           <div id="message"></div>
           <div class="header-right">
-            <input id="newGymInput" type="text" placeholder="add/remove gym" maxlength="60" hidden />
+            <input id="newGymInput" type="text" placeholder="add/remove gym" hidden />
             <button id="newGym" class="badge">modify gym list</button>
             <button id="notifToggle" aria-label="Toggle notifications" hidden>🔕</button>
             <button id="themeToggle" aria-label="Toggle theme">🌙</button>
@@ -1397,7 +1397,6 @@
             const noteIn = document.createElement("input");
             noteIn.type = "text";
             noteIn.placeholder = "leave a note...";
-            noteIn.maxLength = 60;
             const noteBtn = document.createElement("button");
             noteBtn.className = "secondary";
             noteBtn.textContent = "send";
