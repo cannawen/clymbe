@@ -492,7 +492,7 @@
                 <option value="Bouldering Project">Bouldering Project</option>
               </select>
             </h1>
-            <p class="hint">enter your name, then tap <strong>1 / 2 / 3</strong> to check in. get push notifications, leave notes, and pick colors.</p>
+            <p class="hint">let everyone know you're clymbing. get push notifications, leave notes, and pick colors.</p>
           </div>
           <div class="header-right">
             <button id="refresh" class="badge" aria-label="Refresh status">🔄</button>
@@ -505,19 +505,19 @@
           <input id="nameInput" type="text" placeholder="your name" autocomplete="name" />
           <input id="noteInput" type="text" placeholder="note (optional)" maxlength="60" />
           <div class="check-with-duration">
-            <span>i'm here for</span>
+            <span>i'm clymbing for</span>
             <div class="duration-buttons">
               <button class="duration" data-hours="1">1</button>
               <button class="duration" data-hours="2">2</button>
               <button class="duration" data-hours="3">3</button>
             </div>
-            <span>hours</span>
+            <span>hrs</span>
           </div>
         </div>
         <div id="message"></div>
-        <div id="status">loading status...</div>
         <p class="people-title">people currently here</p>
         <ul id="peopleHere"></ul>
+        <div id="status">loading status...</div>
       </section>
     </main>
     <script>
