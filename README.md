@@ -47,6 +47,12 @@ Each deployment has its own Deno KV database — they do not share data.
   - body: `{ "name": "Your Name", "is_here": true | false }`
 - `POST /api/sessions/add`
    - body: `{ "gym": "vital lower east side", "name": "Your Name", "session_details": "arriving in an hour climbing for 90m", "note": "optional", "timezone": "America/New_York", "now_iso": "2026-03-19T22:00:00.000Z" }`
+- `POST /api/sessions/update`
+   - body: `{ "gym": "vital lower east side", "name": "Your Name", "session_id": "uuid", "session_details": "tomorrow at 7pm for 2h", "note": "optional", "timezone": "America/New_York", "now_iso": "2026-03-19T22:00:00.000Z" }`
+- `POST /api/sessions/cancel`
+   - body: `{ "gym": "vital lower east side", "name": "Your Name", "session_id": "uuid" }`
 - `GET /api/sessions`
 - `POST /api/reset`
 - `GET /api/healthz`
+
+Push reminders are sent at 7:00 PM America/New_York time on the day before any scheduled sessions.

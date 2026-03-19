@@ -509,6 +509,16 @@
         color: var(--text-muted);
         font-size: 0.82rem;
       }
+      .session-actions {
+        display: flex;
+        gap: 0.4rem;
+        flex-wrap: wrap;
+      }
+      .session-actions button {
+        font-size: 0.75rem;
+        padding: 0.28rem 0.5rem;
+        border-radius: 8px;
+      }
       #newGymInput {
         min-width: 180px;
         max-width: 240px;
@@ -1087,6 +1097,7 @@
 
       const renderScheduledSessions = (sessions) => {
         scheduledSessionsEl.innerHTML = "";
+        const myName = normalizeName(nameInputEl.value).toLowerCase();
         if (!sessions || sessions.length === 0) {
           const emptyEl = document.createElement("li");
           emptyEl.className = "session-item";
@@ -1126,9 +1137,118 @@
             item.appendChild(note);
           }
 
+          if (myName && session.name && session.name.toLowerCase() === myName) {
+            const actions = document.createElement("div");
+            actions.className = "session-actions";
+
+            const editBtn = document.createElement("button");
+            editBtn.className = "secondary";
+            editBtn.textContent = "edit";
+            editBtn.addEventListener("click", async () => {
+              await editScheduledSession(session);
+            });
+
+            const cancelBtn = document.createElement("button");
+            cancelBtn.className = "secondary";
+            cancelBtn.textContent = "cancel";
+            cancelBtn.addEventListener("click", async () => {
+              await cancelScheduledSession(session);
+            });
+
+            actions.appendChild(editBtn);
+            actions.appendChild(cancelBtn);
+            item.appendChild(actions);
+          }
+
           scheduledSessionsEl.appendChild(item);
         }
       };
+
+      async function editScheduledSession(session) {
+        const name = normalizeName(nameInputEl.value);
+        if (!name) {
+          messageEl.textContent = "enter your name first";
+          return;
+        }
+
+        const updatedDetails = window.prompt("edit session details", session.details_text || "");
+        if (updatedDetails === null) {
+          return;
+        }
+        const trimmedDetails = updatedDetails.trim();
+        if (!trimmedDetails) {
+          messageEl.textContent = "session details are required when editing";
+          return;
+        }
+
+        const updatedNote = window.prompt("edit note (optional)", session.note || "");
+        if (updatedNote === null) {
+          return;
+        }
+
+        try {
+          const gym = getSelectedGym();
+          const response = await fetch("/api/sessions/update", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              gym,
+              name,
+              session_id: session.id,
+              session_details: trimmedDetails,
+              note: updatedNote.trim(),
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+              now_iso: new Date().toISOString(),
+            }),
+          });
+
+          if (!response.ok) {
+            const errorBody = await response.json().catch(() => ({ message: "session update failed" }));
+            throw new Error(errorBody.message || "session update failed");
+          }
+
+          messageEl.textContent = "session updated";
+          await loadStatus();
+        } catch (error) {
+          messageEl.textContent = error instanceof Error ? error.message : "session update failed";
+        }
+      }
+
+      async function cancelScheduledSession(session) {
+        const name = normalizeName(nameInputEl.value);
+        if (!name) {
+          messageEl.textContent = "enter your name first";
+          return;
+        }
+
+        const confirmed = window.confirm("cancel this scheduled session?");
+        if (!confirmed) {
+          return;
+        }
+
+        try {
+          const gym = getSelectedGym();
+          const response = await fetch("/api/sessions/cancel", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              gym,
+              name,
+              session_id: session.id,
+            }),
+          });
+
+          if (!response.ok) {
+            const errorBody = await response.json().catch(() => ({ message: "session cancel failed" }));
+            throw new Error(errorBody.message || "session cancel failed");
+          }
+
+          messageEl.textContent = "session cancelled";
+          await loadStatus();
+        } catch (error) {
+          messageEl.textContent = error instanceof Error ? error.message : "session cancel failed";
+        }
+      }
 
       const renderPeopleHere = (status) => {
         peopleHereEl.innerHTML = "";
@@ -1420,6 +1540,9 @@
           window.localStorage.removeItem(NAME_STORAGE_KEY);
         }
         updateNotifButton();
+        if (currentStatus) {
+          renderScheduledSessions(currentStatus.scheduled_sessions || []);
+        }
         if (pushSubscription && value) {
           const gym = getSelectedGym();
           fetch("/api/push/subscribe", {

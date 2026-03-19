@@ -5,6 +5,6 @@
     "web-push": "npm:web-push@^3.6.7"
   },
   "tasks": {
-    "start": "deno run --allow-net --allow-env --allow-read=./static main.ts"
+    "start": "deno run --env-file=.env --allow-net --allow-env --allow-read=./static main.ts"
   }
 }

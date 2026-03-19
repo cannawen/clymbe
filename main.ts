@@ -33,7 +33,7 @@ type StandardizedSessionDetails = {
   inferred_from_text: string;
 };
 
-type ScheduledSessionStatus = "scheduled" | "checked_in" | "completed";
+type ScheduledSessionStatus = "scheduled" | "checked_in" | "completed" | "cancelled";
 
 type ScheduledSession = {
   id: string;
@@ -189,20 +189,42 @@ webpush.setVapidDetails(vapidSubject, vapidKeys.publicKey, vapidKeys.privateKey)
 
 const isValidIsoDate = (value: string): boolean => !Number.isNaN(new Date(value).getTime());
 
-const getLocalDateKey = (date: Date): string => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+const REMINDER_TIME_ZONE = "America/New_York";
+
+const getDateKeyInTimeZone = (date: Date, timeZone: string): string => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  if (!year || !month || !day) {
+    throw new Error("failed to derive date key in timezone");
+  }
   return `${year}-${month}-${day}`;
 };
 
-const getTomorrowRange = (now: Date): { start: Date; end: Date } => {
-  const start = new Date(now);
-  start.setDate(start.getDate() + 1);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-  return { start, end };
+const addDaysToDateKey = (dateKey: string, days: number): string => {
+  const [year, month, day] = dateKey.split("-").map((v) => Number(v));
+  const base = new Date(Date.UTC(year, month - 1, day));
+  base.setUTCDate(base.getUTCDate() + days);
+  const y = base.getUTCFullYear();
+  const m = String(base.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(base.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
+
+const getHourInTimeZone = (date: Date, timeZone: string): number => {
+  const hour = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    hour12: false,
+  }).format(date);
+  return Number(hour);
 };
 
 const sanitizeGeminiJson = (raw: string): string =>
@@ -396,21 +418,33 @@ const sessionStore = {
       session.status === "scheduled" && new Date(session.start_at).getTime() > nowTs
     );
   },
-  async listScheduledForNameInRange(
+  async getById(gym: string, id: string): Promise<ScheduledSession | null> {
+    const normalizedGym = normalizeGym(gym);
+    const entry = await kv.get<ScheduledSession>([
+      ...SCHEDULED_SESSION_KEY_PREFIX,
+      normalizedGym,
+      id,
+    ]);
+    if (!entry.value) return null;
+    return {
+      ...entry.value,
+      gym: normalizedGym,
+      name: normalizeName(entry.value.name),
+    };
+  },
+  async listScheduledForNameOnDateKey(
     gym: string,
     name: string,
-    start: Date,
-    end: Date,
+    dateKey: string,
+    timeZone: string,
   ): Promise<ScheduledSession[]> {
     const normalizedName = normalizeName(name);
-    const startTs = start.getTime();
-    const endTs = end.getTime();
     const sessions = await this.listAll(gym);
     return sessions.filter((session) => {
       if (session.status !== "scheduled") return false;
       if (!namesEqual(session.name, normalizedName)) return false;
-      const ts = new Date(session.start_at).getTime();
-      return ts >= startTs && ts < endTs;
+      const sessionDateKey = getDateKeyInTimeZone(new Date(session.start_at), timeZone);
+      return sessionDateKey === dateKey;
     });
   },
 };
@@ -999,6 +1033,179 @@ router.post("/api/sessions/add", async (ctx: Ctx) => {
   }
 });
 
+router.post("/api/sessions/update", async (ctx: Ctx) => {
+  if (!ctx.request.hasBody) {
+    ctx.response.status = 400;
+    ctx.response.body = { message: "body required" };
+    return;
+  }
+
+  let body: unknown;
+  try {
+    body = await ctx.request.body.json();
+  } catch {
+    ctx.response.status = 400;
+    ctx.response.body = { message: "invalid json body" };
+    return;
+  }
+
+  const b = body as Record<string, unknown>;
+  if (
+    typeof b.gym !== "string" ||
+    typeof b.name !== "string" ||
+    typeof b.session_id !== "string" ||
+    typeof b.session_details !== "string"
+  ) {
+    ctx.response.status = 400;
+    ctx.response.body = {
+      message: "body must include string gym, name, session_id, and session_details",
+    };
+    return;
+  }
+
+  const gym = normalizeGym(b.gym as string);
+  const name = normalizeName(b.name as string);
+  const sessionId = (b.session_id as string).trim();
+  const sessionDetails = (b.session_details as string).trim();
+  const note = typeof b.note === "string" ? b.note.trim() : "";
+  const timezone = typeof b.timezone === "string" && b.timezone.trim()
+    ? b.timezone.trim()
+    : "UTC";
+  const nowIsoInput = typeof b.now_iso === "string" && isValidIsoDate(b.now_iso)
+    ? new Date(b.now_iso).toISOString()
+    : new Date().toISOString();
+
+  if (!sessionId || !sessionDetails) {
+    ctx.response.status = 400;
+    ctx.response.body = { message: "session_id and session_details are required" };
+    return;
+  }
+
+  const existing = await sessionStore.getById(gym, sessionId);
+  if (!existing) {
+    ctx.response.status = 404;
+    ctx.response.body = { message: "scheduled session not found" };
+    return;
+  }
+
+  if (!namesEqual(existing.name, name)) {
+    ctx.response.status = 403;
+    ctx.response.body = { message: "you can only edit your own scheduled sessions" };
+    return;
+  }
+
+  const now = new Date(nowIsoInput);
+  if (existing.status !== "scheduled" || new Date(existing.start_at).getTime() <= now.getTime()) {
+    ctx.response.status = 400;
+    ctx.response.body = { message: "only future scheduled sessions can be edited" };
+    return;
+  }
+
+  try {
+    const standardizedDetails = await parseSessionDetailsWithGemini({
+      sessionDetails,
+      nowIso: nowIsoInput,
+      timezone,
+    });
+
+    const sessionStart = new Date(standardizedDetails.arrival_time_iso);
+    const sessionEnd = new Date(
+      sessionStart.getTime() + standardizedDetails.duration_minutes * 60 * 1000,
+    );
+
+    if (sessionEnd.getTime() <= now.getTime()) {
+      throw new Error("session end time must be in the future");
+    }
+
+    const next: ScheduledSession = {
+      ...existing,
+      ...(note ? { note } : {}),
+      ...(!note ? { note: undefined } : {}),
+      details_text: sessionDetails,
+      standardized_details: standardizedDetails,
+      start_at: sessionStart.toISOString(),
+      end_at: sessionEnd.toISOString(),
+      updated_at: new Date().toISOString(),
+      status: sessionStart.getTime() <= now.getTime() ? "checked_in" : "scheduled",
+    };
+
+    if (next.status === "checked_in") {
+      await store.setPresence(gym, name, true, next.note, {
+        checkoutAtIso: next.end_at,
+        checkedInAtIso: now.toISOString(),
+      });
+      next.checked_in_at = now.toISOString();
+    }
+
+    await sessionStore.write(next);
+    await processScheduledSessionsForGym(gym);
+    const status = await store.read(gym);
+    ctx.response.body = { status, scheduled_session: next };
+  } catch (error) {
+    ctx.response.status = 400;
+    ctx.response.body = {
+      message: error instanceof Error ? error.message : "invalid request",
+    };
+  }
+});
+
+router.post("/api/sessions/cancel", async (ctx: Ctx) => {
+  if (!ctx.request.hasBody) {
+    ctx.response.status = 400;
+    ctx.response.body = { message: "body required" };
+    return;
+  }
+
+  let body: unknown;
+  try {
+    body = await ctx.request.body.json();
+  } catch {
+    ctx.response.status = 400;
+    ctx.response.body = { message: "invalid json body" };
+    return;
+  }
+
+  const b = body as Record<string, unknown>;
+  if (typeof b.gym !== "string" || typeof b.name !== "string" || typeof b.session_id !== "string") {
+    ctx.response.status = 400;
+    ctx.response.body = { message: "body must include string gym, name, and session_id" };
+    return;
+  }
+
+  const gym = normalizeGym(b.gym as string);
+  const name = normalizeName(b.name as string);
+  const sessionId = (b.session_id as string).trim();
+
+  const existing = await sessionStore.getById(gym, sessionId);
+  if (!existing) {
+    ctx.response.status = 404;
+    ctx.response.body = { message: "scheduled session not found" };
+    return;
+  }
+
+  if (!namesEqual(existing.name, name)) {
+    ctx.response.status = 403;
+    ctx.response.body = { message: "you can only cancel your own scheduled sessions" };
+    return;
+  }
+
+  if (existing.status !== "scheduled") {
+    ctx.response.status = 400;
+    ctx.response.body = { message: "only future scheduled sessions can be cancelled" };
+    return;
+  }
+
+  const next: ScheduledSession = {
+    ...existing,
+    status: "cancelled",
+    updated_at: new Date().toISOString(),
+  };
+
+  await sessionStore.write(next);
+  const status = await store.read(gym);
+  ctx.response.body = { status, cancelled_session_id: sessionId };
+});
+
 router.get("/api/healthz", (ctx: Ctx) => {
   ctx.response.body = { ok: true };
 });
@@ -1058,12 +1265,12 @@ async function listKnownGyms(): Promise<string[]> {
 
 async function sendTomorrowScheduleReminders(): Promise<void> {
   const now = new Date();
-  if (now.getHours() !== 19) {
+  if (getHourInTimeZone(now, REMINDER_TIME_ZONE) !== 19) {
     return;
   }
 
-  const localDateKey = getLocalDateKey(now);
-  const { start: tomorrowStart, end: tomorrowEnd } = getTomorrowRange(now);
+  const localDateKey = getDateKeyInTimeZone(now, REMINDER_TIME_ZONE);
+  const tomorrowDateKey = addDaysToDateKey(localDateKey, 1);
   const gyms = await listKnownGyms();
 
   for (const gym of gyms) {
@@ -1080,11 +1287,11 @@ async function sendTomorrowScheduleReminders(): Promise<void> {
       const sent = await kv.get<boolean>(reminderKey);
       if (sent.value) continue;
 
-      const sessions = await sessionStore.listScheduledForNameInRange(
+      const sessions = await sessionStore.listScheduledForNameOnDateKey(
         gym,
         sub.name,
-        tomorrowStart,
-        tomorrowEnd,
+        tomorrowDateKey,
+        REMINDER_TIME_ZONE,
       );
       if (sessions.length === 0) continue;
 
