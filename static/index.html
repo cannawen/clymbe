@@ -497,6 +497,11 @@
         gap: 0.5rem;
         flex-wrap: wrap;
       }
+      .session-head-right {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
       .session-name {
         font-weight: 600;
         color: var(--person-name);
@@ -509,15 +514,16 @@
         color: var(--text-muted);
         font-size: 0.82rem;
       }
-      .session-actions {
-        display: flex;
-        gap: 0.4rem;
-        flex-wrap: wrap;
-      }
-      .session-actions button {
-        font-size: 0.75rem;
-        padding: 0.28rem 0.5rem;
-        border-radius: 8px;
+      .session-trash {
+        width: 1.65rem;
+        height: 1.65rem;
+        padding: 0;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+        font-size: 0.85rem;
       }
       #newGymInput {
         min-width: 180px;
@@ -537,6 +543,11 @@
         gap: 0.75rem;
         flex-wrap: wrap;
         transition: background 0.3s, border-color 0.3s;
+      }
+      .person-main-right {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
       }
       .person-name-wrap {
         display: flex;
@@ -1121,8 +1132,26 @@
           when.className = "session-time";
           when.textContent = formatSessionWindow(session.start_at, session.end_at);
 
+          const right = document.createElement("span");
+          right.className = "session-head-right";
+          right.appendChild(when);
+
           head.appendChild(name);
-          head.appendChild(when);
+
+          if (myName && session.name && session.name.toLowerCase() === myName) {
+            const cancelBtn = document.createElement("button");
+            cancelBtn.className = "secondary session-trash";
+            cancelBtn.type = "button";
+            cancelBtn.setAttribute("aria-label", "Delete scheduled session");
+            cancelBtn.title = "Delete scheduled session";
+            cancelBtn.textContent = "🗑";
+            cancelBtn.addEventListener("click", async () => {
+              await cancelScheduledSession(session);
+            });
+            right.appendChild(cancelBtn);
+          }
+
+          head.appendChild(right);
           item.appendChild(head);
 
           const details = document.createElement("div");
@@ -1137,92 +1166,14 @@
             item.appendChild(note);
           }
 
-          if (myName && session.name && session.name.toLowerCase() === myName) {
-            const actions = document.createElement("div");
-            actions.className = "session-actions";
-
-            const editBtn = document.createElement("button");
-            editBtn.className = "secondary";
-            editBtn.textContent = "edit";
-            editBtn.addEventListener("click", async () => {
-              await editScheduledSession(session);
-            });
-
-            const cancelBtn = document.createElement("button");
-            cancelBtn.className = "secondary";
-            cancelBtn.textContent = "cancel";
-            cancelBtn.addEventListener("click", async () => {
-              await cancelScheduledSession(session);
-            });
-
-            actions.appendChild(editBtn);
-            actions.appendChild(cancelBtn);
-            item.appendChild(actions);
-          }
-
           scheduledSessionsEl.appendChild(item);
         }
       };
-
-      async function editScheduledSession(session) {
-        const name = normalizeName(nameInputEl.value);
-        if (!name) {
-          messageEl.textContent = "enter your name first";
-          return;
-        }
-
-        const updatedDetails = window.prompt("edit session details", session.details_text || "");
-        if (updatedDetails === null) {
-          return;
-        }
-        const trimmedDetails = updatedDetails.trim();
-        if (!trimmedDetails) {
-          messageEl.textContent = "session details are required when editing";
-          return;
-        }
-
-        const updatedNote = window.prompt("edit note (optional)", session.note || "");
-        if (updatedNote === null) {
-          return;
-        }
-
-        try {
-          const gym = getSelectedGym();
-          const response = await fetch("/api/sessions/update", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              gym,
-              name,
-              session_id: session.id,
-              session_details: trimmedDetails,
-              note: updatedNote.trim(),
-              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-              now_iso: new Date().toISOString(),
-            }),
-          });
-
-          if (!response.ok) {
-            const errorBody = await response.json().catch(() => ({ message: "session update failed" }));
-            throw new Error(errorBody.message || "session update failed");
-          }
-
-          messageEl.textContent = "session updated";
-          await loadStatus();
-        } catch (error) {
-          messageEl.textContent = error instanceof Error ? error.message : "session update failed";
-        }
-      }
 
       async function cancelScheduledSession(session) {
         const name = normalizeName(nameInputEl.value);
         if (!name) {
           messageEl.textContent = "enter your name first";
-          return;
-        }
-
-        const confirmed = window.confirm("cancel this scheduled session?");
-        if (!confirmed) {
           return;
         }
 
@@ -1299,12 +1250,28 @@
           itemEl.appendChild(nameWrap);
 
           const durationLabel = formatPresenceDuration(person.checkout_at);
+          const rightSide = document.createElement("span");
+          rightSide.className = "person-main-right";
+
           if (durationLabel) {
             const timeSpan = document.createElement("span");
             timeSpan.className = "person-time";
             timeSpan.textContent = durationLabel;
-            itemEl.appendChild(timeSpan);
+            rightSide.appendChild(timeSpan);
           }
+
+          const removeBtn = document.createElement("button");
+          removeBtn.className = "secondary session-trash";
+          removeBtn.type = "button";
+          removeBtn.setAttribute("aria-label", `Remove ${person.name} check-in`);
+          removeBtn.title = `Remove ${person.name} check-in`;
+          removeBtn.textContent = "🗑";
+          removeBtn.addEventListener("click", async () => {
+            await deleteCheckedInPerson(person.name);
+          });
+          rightSide.appendChild(removeBtn);
+
+          itemEl.appendChild(rightSide);
 
           // notes
           if (person.notes && person.notes.length > 0) {
@@ -1509,6 +1476,35 @@
         }
       }
 
+      async function deleteCheckedInPerson(targetName) {
+        try {
+          const gym = getSelectedGym();
+          const response = await fetch("/api/presence", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              gym,
+              name: targetName,
+              is_here: false,
+            }),
+          });
+
+          if (!response.ok) {
+            const errorBody = await response.json().catch(() => ({ message: "remove failed" }));
+            throw new Error(errorBody.message || "remove failed");
+          }
+
+          messageEl.textContent = `${targetName} removed from current check-ins`;
+          await loadStatus();
+        } catch (error) {
+          if (error instanceof TypeError) {
+            messageEl.textContent = "could not reach server. make sure deno task start is running, then refresh.";
+            return;
+          }
+          messageEl.textContent = error instanceof Error ? error.message : "remove failed";
+        }
+      }
+
       async function sendNote(targetName, text) {
         const myName = normalizeName(nameInputEl.value);
         if (!myName) {
@@ -1528,6 +1524,10 @@
           }
           await loadStatus();
         } catch (error) {
+          if (error instanceof TypeError) {
+            messageEl.textContent = "could not reach server. make sure deno task start is running, then refresh.";
+            return;
+          }
           messageEl.textContent = error instanceof Error ? error.message : "note failed";
         }
       }
