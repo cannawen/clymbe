@@ -254,7 +254,8 @@
       }
       .section-controls {
         display: flex;
-        justify-content: flex-end;
+        justify-content: space-between;
+        align-items: center;
         margin-top: 1.25rem;
       }
       .footer-credit {
@@ -609,7 +610,6 @@
         opacity: 1;
       }
       #message {
-        margin-top: 0.65rem;
         min-height: 1.2rem;
         color: var(--message-color);
         font-size: 0.92rem;
@@ -669,15 +669,15 @@
             <span>hrs</span>
           </div>
         </div>
-        <div id="message"></div>
         <p class="people-title">people currently here</p>
         <ul id="peopleHere"></ul>
         <div id="status">loading status...</div>
         <div class="section-controls">
+          <div id="message"></div>
           <div class="header-right">
-            <button id="reset" class="badge">reset</button>
             <input id="newGymInput" type="text" placeholder="gym name" maxlength="60" hidden />
             <button id="newGym" class="badge">new gym</button>
+            <button id="reset" class="badge">reset</button>
             <button id="notifToggle" aria-label="Toggle notifications" hidden>🔕</button>
             <button id="themeToggle" aria-label="Toggle theme">🌙</button>
           </div>
@@ -1226,7 +1226,7 @@
             throw new Error(errorBody.message || "presence update failed");
           }
 
-          messageEl.textContent = isHere ? `${name} is now here` : `${name} checked out`;
+          messageEl.textContent = isHere ? `${name} is now at ${gym}` : `${name} checked out`;
           if (isHere) {
             celebrateCheckIn();
           }
