@@ -498,6 +498,13 @@
         flex: 1;
         max-width: 240px;
       }
+      #newGymInput {
+        min-width: 180px;
+        max-width: 240px;
+      }
+      #newGymInput[hidden] {
+        display: none;
+      }
       .person {
         border: 1px solid var(--person-border);
         border-radius: 10px;
@@ -642,8 +649,8 @@
             <h1 class="title-row">
               <span>clymbe @</span>
               <select id="gymSelect" class="title-select" aria-label="Select gym location">
-                <option value="Vital Lower East Side">Vital Lower East Side</option>
-                <option value="Bouldering Project">Bouldering Project</option>
+                <option value="vital lower east side">vital lower east side</option>
+                <option value="bouldering project">bouldering project</option>
               </select>
             </h1>
             <p class="hint">let everyone know you're clymbing. get push notifications, leave notes, and pick colors.</p>
@@ -669,6 +676,8 @@
         <div class="section-controls">
           <div class="header-right">
             <button id="reset" class="badge">reset</button>
+            <input id="newGymInput" type="text" placeholder="gym name" maxlength="60" hidden />
+            <button id="newGym" class="badge">new gym</button>
             <button id="notifToggle" aria-label="Toggle notifications" hidden>🔕</button>
             <button id="themeToggle" aria-label="Toggle theme">🌙</button>
           </div>
@@ -716,15 +725,19 @@
 
       const NAME_STORAGE_KEY = "clymbe_checkin_name";
       const GYM_STORAGE_KEY = "clymbe_selected_gym";
+      const CUSTOM_GYMS_STORAGE_KEY = "clymbe_custom_gyms";
       const THEME_KEY = "clymbe_theme";
       const NOTIF_PREF_KEY = "clymbe_notif_pref";
       const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+      const DEFAULT_GYMS = ["vital lower east side", "bouldering project"];
       const statusEl = document.getElementById("status");
       const messageEl = document.getElementById("message");
       const peopleHereEl = document.getElementById("peopleHere");
       const nameInputEl = document.getElementById("nameInput");
       const noteInputEl = document.getElementById("noteInput");
       const resetEl = document.getElementById("reset");
+      const newGymInputEl = document.getElementById("newGymInput");
+      const newGymButtonEl = document.getElementById("newGym");
       const themeToggleEl = document.getElementById("themeToggle");
       const notifToggleEl = document.getElementById("notifToggle");
       const gymSelectEl = document.getElementById("gymSelect");
@@ -749,6 +762,8 @@
       }
 
       let currentStatus = null;
+      let customGyms = [];
+      let addingGym = false;
 
       // theme toggle
       const getTheme = () => document.documentElement.getAttribute("data-theme");
@@ -766,17 +781,113 @@
 
       // gym location selection
       const getSelectedGym = () => gymSelectEl.value;
-      const setSelectedGym = (gym) => {
-        gymSelectEl.value = gym;
-        localStorage.setItem(GYM_STORAGE_KEY, gym);
-        document.title = `clymbe @ ${gym}`;
+      const normalizeGymName = (gymName) => gymName.trim().replace(/\s+/g, " ").toLowerCase();
+      const getAllGyms = () => [...DEFAULT_GYMS, ...customGyms];
+      const saveCustomGyms = () => {
+        localStorage.setItem(CUSTOM_GYMS_STORAGE_KEY, JSON.stringify(customGyms));
       };
+      const loadCustomGyms = () => {
+        try {
+          const saved = localStorage.getItem(CUSTOM_GYMS_STORAGE_KEY);
+          if (!saved) return [];
+          const parsed = JSON.parse(saved);
+          if (!Array.isArray(parsed)) return [];
+          const unique = new Set();
+          for (const gym of parsed) {
+            if (typeof gym !== "string") continue;
+            const normalized = normalizeGymName(gym);
+            if (!normalized || DEFAULT_GYMS.includes(normalized)) continue;
+            unique.add(normalized);
+          }
+          return [...unique];
+        } catch {
+          return [];
+        }
+      };
+      const renderGymOptions = (selectedGym) => {
+        gymSelectEl.innerHTML = "";
+        for (const gym of getAllGyms()) {
+          const optionEl = document.createElement("option");
+          optionEl.value = gym;
+          optionEl.textContent = gym;
+          gymSelectEl.appendChild(optionEl);
+        }
+        if (selectedGym && getAllGyms().includes(selectedGym)) {
+          gymSelectEl.value = selectedGym;
+        }
+      };
+      const setSelectedGym = (gym) => {
+        const normalizedGym = normalizeGymName(gym);
+        const exists = getAllGyms().includes(normalizedGym);
+        if (!exists && normalizedGym) {
+          customGyms.push(normalizedGym);
+          saveCustomGyms();
+          renderGymOptions(normalizedGym);
+        }
+        gymSelectEl.value = normalizedGym;
+        localStorage.setItem(GYM_STORAGE_KEY, normalizedGym);
+        document.title = `clymbe @ ${normalizedGym}`;
+      };
+      customGyms = loadCustomGyms();
+      saveCustomGyms();
+      renderGymOptions();
       const savedGym = localStorage.getItem(GYM_STORAGE_KEY);
       if (savedGym) setSelectedGym(savedGym);
       else setSelectedGym(getSelectedGym());
       gymSelectEl.addEventListener("change", () => {
         setSelectedGym(getSelectedGym());
         loadStatus();
+      });
+
+      const setNewGymMode = (isActive) => {
+        addingGym = isActive;
+        newGymButtonEl.textContent = isActive ? "add gym" : "new gym";
+        newGymInputEl.hidden = !isActive;
+        if (isActive) {
+          newGymInputEl.focus();
+        } else {
+          newGymInputEl.value = "";
+        }
+      };
+
+      const addGymFromInput = async () => {
+        const normalizedGym = normalizeGymName(newGymInputEl.value);
+        if (!normalizedGym) {
+          messageEl.textContent = "enter a gym name first";
+          return;
+        }
+        if (getAllGyms().includes(normalizedGym)) {
+          setSelectedGym(normalizedGym);
+          setNewGymMode(false);
+          messageEl.textContent = "gym already exists";
+          await loadStatus();
+          return;
+        }
+
+        customGyms.push(normalizedGym);
+        customGyms = [...new Set(customGyms)];
+        saveCustomGyms();
+        renderGymOptions(normalizedGym);
+        setSelectedGym(normalizedGym);
+        setNewGymMode(false);
+        messageEl.textContent = `added gym: ${normalizedGym}`;
+        await loadStatus();
+      };
+
+      newGymButtonEl.addEventListener("click", async () => {
+        if (!addingGym) {
+          setNewGymMode(true);
+          return;
+        }
+        await addGymFromInput();
+      });
+
+      newGymInputEl.addEventListener("keydown", async (event) => {
+        if (event.key !== "Enter" || event.isComposing) {
+          return;
+        }
+        event.preventDefault();
+        await addGymFromInput();
       });
 
       const normalizeName = (name) => name.trim().replace(/\s+/g, " ");

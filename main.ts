@@ -3,7 +3,11 @@ import { Router, RouterContext } from "@oak/oak/router";
 import webpush from "web-push";
 
 const port = Number(Deno.env.get("PORT") ?? "5353");
-const gymName = Deno.env.get("DEFAULT_CLYMBE_GYM_NAME") ?? "Vital Lower East Side";
+const gymName =
+  (Deno.env.get("DEFAULT_CLYMBE_GYM_NAME") ?? "vital lower east side")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 
 type Note = { from: string; text: string };
 
@@ -33,6 +37,8 @@ const createStatus = (): Status => ({
 
 const normalizeName = (name: string): string => name.trim().replace(/\s+/g, " ");
 
+const normalizeGym = (gym: string): string => gym.trim().replace(/\s+/g, " ").toLowerCase();
+
 const namesEqual = (left: string, right: string): boolean =>
   left.toLowerCase() === right.toLowerCase();
 
@@ -58,7 +64,8 @@ const normalizeStatus = (value: unknown): Status => {
     typeof candidate.updated_at === "string"
       ? candidate.updated_at
       : new Date().toISOString();
-  const storedGymName = typeof candidate.gym_name === "string" ? candidate.gym_name : gymName;
+  const storedGymName =
+    typeof candidate.gym_name === "string" ? normalizeGym(candidate.gym_name) : gymName;
 
   const rawPeople = Array.isArray(candidate.people_here) ? candidate.people_here : [];
   const peopleMap = new Map<string, PersonHere>();
@@ -153,14 +160,20 @@ webpush.setVapidDetails(vapidSubject, vapidKeys.publicKey, vapidKeys.privateKey)
 
 const pushStore = {
   async save(name: string, gym: string, subscription: StoredSubscription["subscription"]): Promise<void> {
-    await kv.set([...PUSH_SUB_PREFIX, gym, subscription.endpoint], { name, gym, subscription });
+    const normalizedGym = normalizeGym(gym);
+    await kv.set([...PUSH_SUB_PREFIX, normalizedGym, subscription.endpoint], {
+      name,
+      gym: normalizedGym,
+      subscription
+    });
   },
   async remove(gym: string, endpoint: string): Promise<void> {
-    await kv.delete([...PUSH_SUB_PREFIX, gym, endpoint]);
+    await kv.delete([...PUSH_SUB_PREFIX, normalizeGym(gym), endpoint]);
   },
   async getAllForGym(gym: string): Promise<StoredSubscription[]> {
+    const normalizedGym = normalizeGym(gym);
     const entries: StoredSubscription[] = [];
-    for await (const entry of kv.list<StoredSubscription>({ prefix: [...PUSH_SUB_PREFIX, gym] })) {
+    for await (const entry of kv.list<StoredSubscription>({ prefix: [...PUSH_SUB_PREFIX, normalizedGym] })) {
       if (entry.value) entries.push(entry.value);
     }
     return entries;
@@ -227,22 +240,27 @@ const ALLOWED_COLORS = ["#f9a8d4", "#a5b4fc", "#86efac", "#fde68a", "#c4b5fd"];
 
 const store = {
   async read(gym: string): Promise<Status> {
-    const entry = await kv.get<Status>([...STATUS_KEY_PREFIX, gym]);
+    const normalizedGym = normalizeGym(gym);
+    const entry = await kv.get<Status>([...STATUS_KEY_PREFIX, normalizedGym]);
     if (entry.value) {
       return normalizeStatus(entry.value);
     }
     const initial: Status = {
-      gym_name: gym,
+      gym_name: normalizedGym,
       people_here: [],
       last_check_in: null,
       check_in_count: 0,
       updated_at: new Date().toISOString()
     };
-    await kv.set([...STATUS_KEY_PREFIX, gym], initial);
+    await kv.set([...STATUS_KEY_PREFIX, normalizedGym], initial);
     return initial;
   },
   async write(gym: string, status: Status): Promise<void> {
-    await kv.set([...STATUS_KEY_PREFIX, gym], status);
+    const normalizedGym = normalizeGym(gym);
+    await kv.set([...STATUS_KEY_PREFIX, normalizedGym], {
+      ...status,
+      gym_name: normalizeGym(status.gym_name)
+    });
   },
   async setPresence(gym: string, name: string, isHere: boolean, note?: string, hours?: number): Promise<Status> {
     const normalizedName = normalizeName(name);
@@ -417,7 +435,7 @@ type Ctx = RouterContext<string>;
 const router = new Router();
 
 router.get("/api/status", async (ctx: Ctx) => {
-  const gym = ctx.request.url.searchParams.get("gym") || gymName;
+  const gym = normalizeGym(ctx.request.url.searchParams.get("gym") || gymName);
   await store.autoCheckout(gym);
   ctx.response.body = await store.read(gym);
 });
@@ -451,12 +469,13 @@ router.post("/api/presence", async (ctx: Ctx) => {
   }
 
   const payload = body as { name: string; gym: string; is_here: boolean; note?: unknown };
+  const gym = normalizeGym(payload.gym);
   const note = typeof payload.note === "string" ? payload.note.trim() : undefined;
   try {
     const hours = typeof (body as Record<string, unknown>).hours === "number" 
       ? (body as Record<string, unknown>).hours as number
       : undefined;
-    const updatedStatus = await store.setPresence(payload.gym, payload.name, payload.is_here, note || undefined, hours);
+    const updatedStatus = await store.setPresence(gym, payload.name, payload.is_here, note || undefined, hours);
     ctx.response.body = updatedStatus;
 
     if (payload.is_here) {
@@ -464,7 +483,7 @@ router.post("/api/presence", async (ctx: Ctx) => {
       const msg = note
         ? `${name} checked in: "${note}"`
         : `${name} just checked in`;
-      sendPresenceNotifications(payload.gym, name, msg).catch((err) =>
+      sendPresenceNotifications(gym, name, msg).catch((err) =>
         console.error("push notification batch error:", err)
       );
     }
@@ -513,11 +532,13 @@ router.post("/api/react", async (ctx: Ctx) => {
   const reactor = normalizeName(b.reactor as string);
   const target = normalizeName(b.target as string);
 
+  const gym = normalizeGym(b.gym as string);
+
   try {
-    const updatedStatus = await store.addReaction(b.gym, target, reactor, b.emoji as string);
+    const updatedStatus = await store.addReaction(gym, target, reactor, b.emoji as string);
     ctx.response.body = updatedStatus;
 
-    sendReactionNotification(b.gym, reactor, target).catch((err) =>
+    sendReactionNotification(gym, reactor, target).catch((err) =>
       console.error("reaction notification error:", err)
     );
   } catch (error) {
@@ -556,7 +577,7 @@ router.post("/api/note", async (ctx: Ctx) => {
     return;
   }
 
-  const gym = b.gym;
+  const gym = normalizeGym(b.gym as string);
   const from = normalizeName(b.from as string);
   const target = normalizeName(b.target as string);
   const text = (b.text as string).trim();
@@ -585,7 +606,7 @@ router.post("/api/note", async (ctx: Ctx) => {
 });
 
 router.post("/api/reset", async (ctx: Ctx) => {
-  const gym = ctx.request.url.searchParams.get("gym") || gymName;
+  const gym = normalizeGym(ctx.request.url.searchParams.get("gym") || gymName);
   ctx.response.body = await store.reset(gym);
 });
 
@@ -629,7 +650,7 @@ router.post("/api/push/subscribe", async (ctx: Ctx) => {
     return;
   }
 
-  await pushStore.save(normalizeName(b.name as string), b.gym, {
+  await pushStore.save(normalizeName(b.name as string), normalizeGym(b.gym as string), {
     endpoint: sub.endpoint as string,
     keys: {
       p256dh: (sub.keys as Record<string, unknown>).p256dh as string,
@@ -665,7 +686,7 @@ router.post("/api/push/unsubscribe", async (ctx: Ctx) => {
     return;
   }
 
-  await pushStore.remove(b.gym, b.endpoint as string);
+  await pushStore.remove(normalizeGym(b.gym as string), b.endpoint as string);
   ctx.response.body = { unsubscribed: true };
 });
 
@@ -703,7 +724,7 @@ app.use(async (ctx) => {
 // Auto-checkout cleanup task - runs every 30 seconds.
 setInterval(async () => {
   try {
-    const gyms = ["Vital Lower East Side", "Bouldering Project"];
+    const gyms = ["vital lower east side", "bouldering project"];
     await Promise.all(gyms.map((gym) => store.autoCheckout(gym)));
   } catch (error) {
     console.error("auto-checkout cleanup error:", error);
