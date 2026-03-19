@@ -1156,15 +1156,11 @@
 
           const details = document.createElement("div");
           details.className = "session-details";
-          details.textContent = session.details_text || session.standardized_details?.inferred_from_text || "scheduled session";
+          const detailsText = session.details_text || session.standardized_details?.inferred_from_text || "scheduled session";
+          details.textContent = session.note
+            ? `${detailsText}. ${session.note}`
+            : detailsText;
           item.appendChild(details);
-
-          if (session.note) {
-            const note = document.createElement("div");
-            note.className = "session-details";
-            note.textContent = `note: ${session.note}`;
-            item.appendChild(note);
-          }
 
           scheduledSessionsEl.appendChild(item);
         }
