@@ -237,11 +237,21 @@
         align-items: center;
         gap: 0.5rem;
         flex-shrink: 0;
-        align-self: flex-start;
+      }
+      .footer-controls {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 1.25rem;
       }
       @media (max-width: 640px) {
+        .header {
+          align-items: flex-start;
+        }
         .title-select {
           min-width: 100%;
+        }
+        .footer-controls {
+          justify-content: flex-start;
         }
       }
       .badge {
@@ -257,7 +267,16 @@
       button.badge {
         cursor: pointer;
       }
+      a.badge {
+        display: inline-flex;
+        align-items: center;
+        text-decoration: none;
+      }
       button.badge:hover {
+        background: var(--badge-bg);
+        border-color: var(--badge-border);
+      }
+      a.badge:hover {
         background: var(--badge-bg);
         border-color: var(--badge-border);
       }
@@ -494,12 +513,6 @@
             </h1>
             <p class="hint">let everyone know you're clymbing. get push notifications, leave notes, and pick colors.</p>
           </div>
-          <div class="header-right">
-            <button id="refresh" class="badge" aria-label="Refresh status">🔄</button>
-            <button id="reset" class="badge">reset</button>
-            <button id="notifToggle" aria-label="Toggle notifications" hidden>🔕</button>
-            <button id="themeToggle" aria-label="Toggle theme">🌙</button>
-          </div>
         </div>
         <div class="row">
           <input id="nameInput" type="text" placeholder="your name" autocomplete="name" />
@@ -518,6 +531,14 @@
         <p class="people-title">people currently here</p>
         <ul id="peopleHere"></ul>
         <div id="status">loading status...</div>
+        <footer class="footer-controls">
+          <div class="header-right">
+            <a class="badge" href="https://github.com/cannawen/clymbe" target="_blank" rel="noreferrer">src</a>
+            <button id="reset" class="badge">reset</button>
+            <button id="notifToggle" aria-label="Toggle notifications" hidden>🔕</button>
+            <button id="themeToggle" aria-label="Toggle theme">🌙</button>
+          </div>
+        </footer>
       </section>
     </main>
     <script>
@@ -535,7 +556,6 @@
       const peopleHereEl = document.getElementById("peopleHere");
       const nameInputEl = document.getElementById("nameInput");
       const noteInputEl = document.getElementById("noteInput");
-      const refreshEl = document.getElementById("refresh");
       const resetEl = document.getElementById("reset");
       const themeToggleEl = document.getElementById("themeToggle");
       const notifToggleEl = document.getElementById("notifToggle");
@@ -1060,8 +1080,6 @@
 
       nameInputEl.addEventListener("keydown", handleQuickCheckInEnter);
       noteInputEl.addEventListener("keydown", handleQuickCheckInEnter);
-
-      refreshEl.addEventListener("click", loadStatus);
 
       durationButtonsEl.forEach((btn) => {
         btn.addEventListener("click", async () => {
