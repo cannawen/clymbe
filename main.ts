@@ -4,7 +4,7 @@ import webpush from "web-push";
 
 const port = Number(Deno.env.get("PORT") ?? "5353");
 const gymName =
-  (Deno.env.get("DEFAULT_CLYMBE_GYM_NAME") ?? "vital lower east side")
+  (Deno.env.get("DEFAULT_CLYMBE_GYM_NAME") ?? "bouldering project")
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();
