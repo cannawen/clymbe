@@ -260,24 +260,28 @@ async function parseSessionDetailsWithGemini(input: {
     throw new Error("GEMINI_API_KEY is not configured");
   }
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: buildGeminiPrompt(input) }] }],
-        generationConfig: {
-          responseMimeType: "application/json",
-          temperature: 0.1,
-        },
-      }),
-    },
-  );
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: buildGeminiPrompt(input) }] }],
+          generationConfig: {
+            responseMimeType: "application/json",
+            temperature: 0.1,
+          },
+        }),
+      },
+    );
+  } catch {
+    throw new Error("unable to reach session parser service");
+  }
 
   if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`gemini parse failed: ${response.status} ${errText}`);
+    throw new Error(`session parser returned ${response.status}`);
   }
 
   const data = await response.json() as Record<string, unknown>;
@@ -1026,9 +1030,22 @@ router.post("/api/sessions/add", async (ctx: Ctx) => {
       standardized_details: standardizedDetails,
     };
   } catch (error) {
+    const rawMessage = error instanceof Error ? error.message : "invalid request";
+    const safeClientMessage = [
+      "session end time must be in the future",
+      "unable to parse arrival time from session details",
+      "unable to parse a valid duration from session details",
+      "gemini returned invalid JSON",
+      "gemini did not return parseable content",
+      "unable to reach session parser service",
+      "GEMINI_API_KEY is not configured",
+    ].includes(rawMessage)
+      ? rawMessage
+      : "unable to parse session details right now";
+
     ctx.response.status = 400;
     ctx.response.body = {
-      message: error instanceof Error ? error.message : "invalid request",
+      message: safeClientMessage,
     };
   }
 });
