@@ -537,9 +537,10 @@
       #addSession {
         min-width: 80px;
       }
-      .people-title {
+      .section-subheader {
         margin: 1rem 0 0.35rem;
-        font-weight: 600;
+        font-size: 2.00rem;
+        font-weight: 700;
         color: var(--people-title);
       }
       #peopleHere {
@@ -772,9 +773,9 @@
           <input id="noteInput" type="text" placeholder="note (optional)" />
           <button id="addSession">add</button>
         </div>
-        <p class="people-title">people currently here</p>
+        <p id="peopleHereTitle" class="section-subheader">people currently here</p>
         <ul id="peopleHere"></ul>
-        <p class="people-title">scheduled climbing sessions</p>
+        <p class="section-subheader">upcoming climbs</p>
         <ul id="scheduledSessions"></ul>
         <div id="status">loading status...</div>
         <div class="section-controls">
@@ -836,6 +837,7 @@
       const SEED_GYMS = ["bouldering project", "vital lower east side"];
       const statusEl = document.getElementById("status");
       const messageEl = document.getElementById("message");
+      const peopleHereTitleEl = document.getElementById("peopleHereTitle");
       const peopleHereEl = document.getElementById("peopleHere");
       const scheduledSessionsEl = document.getElementById("scheduledSessions");
       const nameInputEl = document.getElementById("nameInput");
@@ -1278,11 +1280,10 @@
 
       const renderPeopleHere = (status) => {
         peopleHereEl.innerHTML = "";
-        if (!status.people_here.length) {
-          const emptyEl = document.createElement("li");
-          emptyEl.className = "person";
-          emptyEl.textContent = "nobody checked in yet";
-          peopleHereEl.appendChild(emptyEl);
+        const hasPeopleHere = status.people_here.length > 0;
+        peopleHereTitleEl.hidden = !hasPeopleHere;
+        peopleHereEl.hidden = !hasPeopleHere;
+        if (!hasPeopleHere) {
           return;
         }
         const pastelColors = ["#f9a8d4", "#a5b4fc", "#86efac", "#fde68a", "#c4b5fd", "#93c5fd", "#fca5a5", "#5eead4"];
