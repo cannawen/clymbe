@@ -33,6 +33,8 @@ type StandardizedSessionDetails = {
   inferred_from_text: string;
 };
 
+type ParsedSessionDetails = StandardizedSessionDetails | null;
+
 type ScheduledSessionStatus = "scheduled" | "checked_in" | "completed" | "cancelled";
 
 type ScheduledSession = {
@@ -241,11 +243,14 @@ const buildGeminiPrompt = (input: {
     `User timezone IANA: ${input.timezone}`,
     `User text: ${input.sessionDetails}`,
     "Output JSON ONLY with keys:",
-    "- arrival_time_iso (string, ISO timestamp)",
-    "- duration_minutes (positive integer)",
-    "- inferred_from_text (string, concise interpretation)",
+    "- has_schedule (boolean)",
+    "- arrival_time_iso (string ISO timestamp or null)",
+    "- duration_minutes (positive integer or null)",
+    "- inferred_from_text (string, concise interpretation of the schedule if present, otherwise empty string)",
     "Rules:",
     "- Resolve relative times against Current timestamp using provided timezone.",
+    "- Only set has_schedule to true when the text clearly includes schedule information.",
+    "- If the text is only a generic note with no date, time, or duration, set has_schedule to false and both arrival_time_iso and duration_minutes to null.",
     "- If the user gives only arrival and no duration, default duration_minutes to 60.",
     "- If the user gives only duration and no arrival, default arrival_time_iso to Current timestamp.",
     "- Keep inferred_from_text short and factual.",
@@ -255,7 +260,7 @@ async function parseSessionDetailsWithGemini(input: {
   sessionDetails: string;
   nowIso: string;
   timezone: string;
-}): Promise<StandardizedSessionDetails> {
+}): Promise<ParsedSessionDetails> {
   if (!GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY is not configured");
   }
@@ -313,9 +318,16 @@ async function parseSessionDetailsWithGemini(input: {
   const duration = typeof parsed.duration_minutes === "number"
     ? Math.floor(parsed.duration_minutes)
     : NaN;
+  const hasSchedule = typeof parsed.has_schedule === "boolean"
+    ? parsed.has_schedule
+    : Boolean(arrival || Number.isFinite(duration));
   const interpreted = typeof parsed.inferred_from_text === "string"
     ? parsed.inferred_from_text.trim()
     : "";
+
+  if (!hasSchedule) {
+    return null;
+  }
 
   if (!arrival || !isValidIsoDate(arrival)) {
     throw new Error("unable to parse arrival time from session details");
@@ -941,6 +953,7 @@ router.post("/api/sessions/add", async (ctx: Ctx) => {
   const name = normalizeName(b.name as string);
   const note = typeof b.note === "string" ? b.note.trim() : "";
   const sessionDetails = typeof b.session_details === "string" ? b.session_details.trim() : "";
+  const schedulingText = sessionDetails || note;
   const nowIsoInput = typeof b.now_iso === "string" && isValidIsoDate(b.now_iso)
     ? new Date(b.now_iso).toISOString()
     : new Date().toISOString();
@@ -954,31 +967,40 @@ router.post("/api/sessions/add", async (ctx: Ctx) => {
     return;
   }
 
+  const checkInNowForOneHour = async (reason: string) => {
+    const start = new Date(nowIsoInput);
+    const end = new Date(start.getTime() + 60 * 60 * 1000);
+    const status = await store.setPresence(gym, name, true, note || undefined, {
+      checkoutAtIso: end.toISOString(),
+      checkedInAtIso: start.toISOString(),
+    });
+    ctx.response.body = {
+      status,
+      scheduled_session: null,
+      standardized_details: {
+        arrival_time_iso: start.toISOString(),
+        duration_minutes: 60,
+        inferred_from_text: reason,
+      },
+    };
+  };
+
   try {
-    if (!sessionDetails) {
-      const start = new Date(nowIsoInput);
-      const end = new Date(start.getTime() + 60 * 60 * 1000);
-      const status = await store.setPresence(gym, name, true, note || undefined, {
-        checkoutAtIso: end.toISOString(),
-        checkedInAtIso: start.toISOString(),
-      });
-      ctx.response.body = {
-        status,
-        scheduled_session: null,
-        standardized_details: {
-          arrival_time_iso: start.toISOString(),
-          duration_minutes: 60,
-          inferred_from_text: "no session details provided; defaulted to 60 minutes",
-        },
-      };
+    if (!schedulingText) {
+      await checkInNowForOneHour("no scheduling details provided; defaulted to 60 minutes");
       return;
     }
 
     const standardizedDetails = await parseSessionDetailsWithGemini({
-      sessionDetails,
+      sessionDetails: schedulingText,
       nowIso: nowIsoInput,
       timezone,
     });
+
+    if (!standardizedDetails) {
+      await checkInNowForOneHour("no schedule found in note; defaulted to 60 minutes");
+      return;
+    }
 
     const sessionStart = new Date(standardizedDetails.arrival_time_iso);
     const sessionEnd = new Date(
@@ -997,7 +1019,7 @@ router.post("/api/sessions/add", async (ctx: Ctx) => {
       gym,
       name,
       ...(note ? { note } : {}),
-      details_text: sessionDetails,
+      details_text: schedulingText,
       standardized_details: standardizedDetails,
       start_at: sessionStart.toISOString(),
       end_at: sessionEnd.toISOString(),

@@ -530,10 +530,6 @@
         opacity: 0.35;
         cursor: not-allowed;
       }
-      #sessionDetailsInput {
-        min-width: 240px;
-        flex: 2;
-      }
       #addSession {
         min-width: 80px;
       }
@@ -551,9 +547,8 @@
         gap: 0.45rem;
       }
       #noteInput {
-        min-width: 150px;
-        flex: 1;
-        max-width: 300px;
+        min-width: 240px;
+        flex: 2;
       }
       #scheduledSessions {
         margin: 0;
@@ -769,8 +764,7 @@
         </div>
         <div class="row">
           <input id="nameInput" type="text" placeholder="name" autocomplete="name" />
-          <input id="sessionDetailsInput" type="text" placeholder="friday 9:30 for 2h (optional)" />
-          <input id="noteInput" type="text" placeholder="note (optional)" />
+          <input id="noteInput" type="text" placeholder="note, date, or duration (optional)" />
           <button id="addSession">add</button>
         </div>
         <p id="peopleHereTitle" class="section-subheader">people currently here</p>
@@ -841,7 +835,6 @@
       const peopleHereEl = document.getElementById("peopleHere");
       const scheduledSessionsEl = document.getElementById("scheduledSessions");
       const nameInputEl = document.getElementById("nameInput");
-      const sessionDetailsInputEl = document.getElementById("sessionDetailsInput");
       const noteInputEl = document.getElementById("noteInput");
       const addSessionEl = document.getElementById("addSession");
       const newGymInputEl = document.getElementById("newGymInput");
@@ -1238,9 +1231,7 @@
           const details = document.createElement("div");
           details.className = "session-details";
           const detailsText = session.details_text || session.standardized_details?.inferred_from_text || "scheduled session";
-          details.textContent = session.note
-            ? `${detailsText}. ${session.note}`
-            : detailsText;
+          details.textContent = detailsText;
           item.appendChild(details);
 
           scheduledSessionsEl.appendChild(item);
@@ -1423,7 +1414,6 @@
 
       async function submitSession() {
         const name = normalizeName(nameInputEl.value);
-        const sessionDetails = sessionDetailsInputEl.value.trim();
         const customNote = noteInputEl.value.trim();
         if (!name) {
           messageEl.textContent = "enter your name first";
@@ -1431,7 +1421,6 @@
         }
 
         nameInputEl.disabled = true;
-        sessionDetailsInputEl.disabled = true;
         noteInputEl.disabled = true;
         addSessionEl.disabled = true;
 
@@ -1443,7 +1432,6 @@
             body: JSON.stringify({
               name,
               gym,
-              session_details: sessionDetails,
               timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
               now_iso: new Date().toISOString(),
               ...(customNote ? { note: customNote } : {}),
@@ -1469,16 +1457,12 @@
             messageEl.textContent = `${name} is now at ${gym}`;
             celebrateCheckIn();
           }
-
-          if (!sessionDetails) {
-            sessionDetailsInputEl.value = "";
-          }
+          noteInputEl.value = "";
         } catch (error) {
           messageEl.textContent =
             error instanceof Error ? error.message : "presence update failed";
         } finally {
           nameInputEl.disabled = false;
-          sessionDetailsInputEl.disabled = false;
           noteInputEl.disabled = false;
           addSessionEl.disabled = false;
           await loadStatus();
@@ -1637,7 +1621,6 @@
       };
 
       nameInputEl.addEventListener("keydown", handleSessionEnter);
-      sessionDetailsInputEl.addEventListener("keydown", handleSessionEnter);
       noteInputEl.addEventListener("keydown", handleSessionEnter);
       addSessionEl.addEventListener("click", submitSession);
 

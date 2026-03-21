@@ -1,6 +1,6 @@
 # Clymbe Check-in
 
-Minimal check-in web app: type your name, describe when you will arrive in plain English, and show who is currently at the gym plus scheduled future sessions.
+Minimal check-in web app: type your name, put notes or schedule hints in one text field, and show who is currently at the gym plus scheduled future sessions.
 
 **Original** [clymbe.rocks](https://clymbe.rocks)
 **Live:** [https://climb.rcdis.co/](https://climb.rcdis.co/)
@@ -46,7 +46,7 @@ Each deployment has its own Deno KV database — they do not share data.
 - `POST /api/presence`
   - body: `{ "name": "Your Name", "is_here": true | false }`
 - `POST /api/sessions/add`
-   - body: `{ "gym": "vital lower east side", "name": "Your Name", "session_details": "arriving in an hour climbing for 90m", "note": "optional", "timezone": "America/New_York", "now_iso": "2026-03-19T22:00:00.000Z" }`
+   - body: `{ "gym": "vital lower east side", "name": "Your Name", "note": "arriving in an hour climbing for 90m", "timezone": "America/New_York", "now_iso": "2026-03-19T22:00:00.000Z" }`
 - `POST /api/sessions/cancel`
    - body: `{ "gym": "vital lower east side", "name": "Your Name", "session_id": "uuid" }`
 - `GET /api/sessions`
