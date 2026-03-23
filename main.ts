@@ -42,6 +42,7 @@ type ScheduledSession = {
   gym: string;
   name: string;
   note?: string;
+  notes?: Note[];
   details_text: string;
   standardized_details: StandardizedSessionDetails;
   start_at: string;
@@ -462,6 +463,30 @@ const sessionStore = {
       const sessionDateKey = getDateKeyInTimeZone(new Date(session.start_at), timeZone);
       return sessionDateKey === dateKey;
     });
+  },
+  async addNote(gym: string, sessionId: string, fromName: string, text: string): Promise<ScheduledSession> {
+    const normalizedFrom = normalizeName(fromName);
+    if (!normalizedFrom || !text) {
+      throw new Error("from and text are required");
+    }
+    const session = await this.getById(gym, sessionId);
+    if (!session) {
+      throw new Error("scheduled session not found");
+    }
+    if (session.status !== "scheduled") {
+      throw new Error("can only add notes to future scheduled sessions");
+    }
+    const notes = session.notes ? [...session.notes] : [];
+    const existingIdx = notes.findIndex((n) => namesEqual(n.from, normalizedFrom));
+    const newNote = { from: normalizedFrom, text };
+    if (existingIdx !== -1) {
+      notes[existingIdx] = newNote;
+    } else {
+      notes.push(newNote);
+    }
+    const updated: ScheduledSession = { ...session, notes, updated_at: new Date().toISOString() };
+    await this.write(updated);
+    return updated;
   },
 };
 
@@ -1127,6 +1152,66 @@ router.post("/api/sessions/cancel", async (ctx: Ctx) => {
   await sessionStore.write(next);
   const status = await store.read(gym);
   ctx.response.body = { status, cancelled_session_id: sessionId };
+});
+
+router.post("/api/sessions/note", async (ctx: Ctx) => {
+  if (!ctx.request.hasBody) {
+    ctx.response.status = 400;
+    ctx.response.body = { message: "body required" };
+    return;
+  }
+
+  let body: unknown;
+  try {
+    body = await ctx.request.body.json();
+  } catch {
+    ctx.response.status = 400;
+    ctx.response.body = { message: "invalid json body" };
+    return;
+  }
+
+  const b = body as Record<string, unknown>;
+  if (
+    typeof b.gym !== "string" ||
+    typeof b.session_id !== "string" ||
+    typeof b.from !== "string" ||
+    typeof b.text !== "string"
+  ) {
+    ctx.response.status = 400;
+    ctx.response.body = { message: "body must include string gym, session_id, from, and text" };
+    return;
+  }
+
+  const gym = normalizeGym(b.gym as string);
+  const from = normalizeName(b.from as string);
+  const text = (b.text as string).trim();
+
+  if (!from) {
+    ctx.response.status = 400;
+    ctx.response.body = { message: "from cannot be empty" };
+    return;
+  }
+
+  if (!text) {
+    ctx.response.status = 400;
+    ctx.response.body = { message: "text cannot be empty" };
+    return;
+  }
+
+  try {
+    await sessionStore.addNote(gym, b.session_id as string, from, text);
+    const sessions = await sessionStore.listFuture(gym);
+    ctx.response.body = { sessions };
+  } catch (error) {
+    const rawMessage = error instanceof Error ? error.message : "invalid request";
+    const allowedMessages = [
+      "scheduled session not found",
+      "can only add notes to future scheduled sessions",
+      "from and text are required",
+    ];
+    ctx.response.status = allowedMessages.includes(rawMessage) ? 400 : 400;
+    ctx.response.body = { message: allowedMessages.includes(rawMessage) ? rawMessage : "unable to add note" };
+  }
 });
 
 router.get("/api/healthz", (ctx: Ctx) => {

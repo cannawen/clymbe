@@ -1234,6 +1234,48 @@
           details.textContent = detailsText;
           item.appendChild(details);
 
+          // notes on this session
+          if (session.notes && session.notes.length > 0) {
+            const notesDiv = document.createElement("div");
+            notesDiv.className = "person-notes";
+            for (const note of session.notes) {
+              const noteSpan = document.createElement("span");
+              noteSpan.className = "person-note";
+              const isSelf = note.from.toLowerCase() === session.name.toLowerCase();
+              noteSpan.innerHTML = isSelf
+                ? `"${note.text}"`
+                : `<span class="note-from">${note.from}:</span> "${note.text}"`;
+              notesDiv.appendChild(noteSpan);
+            }
+            item.appendChild(notesDiv);
+          }
+
+          // note input for others
+          if (myName && session.name && session.name.toLowerCase() !== myName) {
+            const noteRow = document.createElement("div");
+            noteRow.className = "note-input-row";
+            const noteIn = document.createElement("input");
+            noteIn.type = "text";
+            noteIn.placeholder = "leave a note...";
+            const noteBtn = document.createElement("button");
+            noteBtn.className = "secondary";
+            noteBtn.textContent = "send";
+            noteBtn.addEventListener("click", async () => {
+              const text = noteIn.value.trim();
+              if (!text) return;
+              noteBtn.disabled = true;
+              await sendSessionNote(session.id, text);
+              noteIn.value = "";
+              noteBtn.disabled = false;
+            });
+            noteIn.addEventListener("keydown", (e) => {
+              if (e.key === "Enter") noteBtn.click();
+            });
+            noteRow.appendChild(noteIn);
+            noteRow.appendChild(noteBtn);
+            item.appendChild(noteRow);
+          }
+
           scheduledSessionsEl.appendChild(item);
         }
       };
@@ -1576,6 +1618,33 @@
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ gym, from: myName, target: targetName, text }),
+          });
+          if (!response.ok) {
+            const errorBody = await response.json().catch(() => ({ message: "note failed" }));
+            throw new Error(errorBody.message || "note failed");
+          }
+          await loadStatus();
+        } catch (error) {
+          if (error instanceof TypeError) {
+            messageEl.textContent = "could not reach server. make sure deno task start is running, then refresh.";
+            return;
+          }
+          messageEl.textContent = error instanceof Error ? error.message : "note failed";
+        }
+      }
+
+      async function sendSessionNote(sessionId, text) {
+        const myName = normalizeName(nameInputEl.value);
+        if (!myName) {
+          messageEl.textContent = "enter your name first";
+          return;
+        }
+        try {
+          const gym = getSelectedGym();
+          const response = await fetch("/api/sessions/note", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ gym, session_id: sessionId, from: myName, text }),
           });
           if (!response.ok) {
             const errorBody = await response.json().catch(() => ({ message: "note failed" }));
