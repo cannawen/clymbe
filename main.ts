@@ -9,7 +9,7 @@ const gymName =
     .replace(/\s+/g, " ")
     .toLowerCase();
 
-type Note = { from: string; text: string };
+type Note = { from?: string; text: string };
 
 type PersonHere = {
   name: string;
@@ -124,11 +124,16 @@ const normalizeStatus = (value: unknown): Status => {
       const validNotes = (candidatePerson.notes as unknown[])
         .filter((n): n is Record<string, unknown> =>
           typeof n === "object" && n !== null &&
-          typeof (n as Record<string, unknown>).from === "string" &&
           typeof (n as Record<string, unknown>).text === "string"
         )
-        .map((n) => ({ from: normalizeName(n.from as string), text: n.text as string }))
-        .filter((n) => n.from.length > 0 && n.text.length > 0);
+        .map((n) => {
+          const rawFrom = typeof n.from === "string" ? normalizeName(n.from) : "";
+          return {
+            ...(rawFrom ? { from: rawFrom } : {}),
+            text: (n.text as string).trim(),
+          };
+        })
+        .filter((n) => n.text.length > 0);
       if (validNotes.length > 0) entry.notes = validNotes;
     } else if (typeof candidatePerson.note === "string" && candidatePerson.note.length > 0) {
       // migrate old single-note format
@@ -464,10 +469,10 @@ const sessionStore = {
       return sessionDateKey === dateKey;
     });
   },
-  async addNote(gym: string, sessionId: string, fromName: string, text: string): Promise<ScheduledSession> {
-    const normalizedFrom = normalizeName(fromName);
-    if (!normalizedFrom || !text) {
-      throw new Error("from and text are required");
+  async addNote(gym: string, sessionId: string, fromName: string | undefined, text: string): Promise<ScheduledSession> {
+    const normalizedFrom = typeof fromName === "string" ? normalizeName(fromName) : "";
+    if (!text) {
+      throw new Error("text is required");
     }
     const session = await this.getById(gym, sessionId);
     if (!session) {
@@ -477,7 +482,7 @@ const sessionStore = {
       throw new Error("can only add notes to future scheduled sessions");
     }
     const notes = session.notes ? [...session.notes] : [];
-    notes.push({ from: normalizedFrom, text });
+    notes.push(normalizedFrom ? { from: normalizedFrom, text } : { text });
     const updated: ScheduledSession = { ...session, notes, updated_at: new Date().toISOString() };
     await this.write(updated);
     return updated;
@@ -549,7 +554,9 @@ const store = {
     } else if (isHere && existingIndex !== -1) {
       const existing = peopleHere[existingIndex];
       const updatedNotes = existing.notes ? [...existing.notes] : [];
-      const selfIdx = updatedNotes.findIndex((n) => namesEqual(n.from, normalizedName));
+      const selfIdx = updatedNotes.findIndex((n) =>
+        typeof n.from === "string" && namesEqual(n.from, normalizedName)
+      );
       if (presenceNote) {
         if (selfIdx !== -1) updatedNotes[selfIdx] = { from: normalizedName, text: presenceNote };
         else updatedNotes.push({ from: normalizedName, text: presenceNote });
@@ -587,11 +594,11 @@ const store = {
     await this.write(gym, next);
     return next;
   },
-  async addNote(gym: string, targetName: string, fromName: string, text: string): Promise<Status> {
+  async addNote(gym: string, targetName: string, fromName: string | undefined, text: string): Promise<Status> {
     const normalizedTarget = normalizeName(targetName);
-    const normalizedFrom = normalizeName(fromName);
-    if (!normalizedTarget || !normalizedFrom || !text) {
-      throw new Error("target, from, and text are required");
+    const normalizedFrom = typeof fromName === "string" ? normalizeName(fromName) : "";
+    if (!normalizedTarget || !text) {
+      throw new Error("target and text are required");
     }
 
     const current = await this.read(gym);
@@ -604,7 +611,7 @@ const store = {
 
     const person = { ...current.people_here[targetIndex] };
     const notes = person.notes ? [...person.notes] : [];
-    notes.push({ from: normalizedFrom, text });
+    notes.push(normalizedFrom ? { from: normalizedFrom, text } : { text });
     person.notes = notes;
 
     const peopleHere = [...current.people_here];
@@ -815,18 +822,17 @@ router.post("/api/note", async (ctx: Ctx) => {
 
   const b = body as Record<string, unknown>;
   if (
-    typeof b.from !== "string" ||
     typeof b.target !== "string" ||
     typeof b.text !== "string" ||
     typeof b.gym !== "string"
   ) {
     ctx.response.status = 400;
-    ctx.response.body = { message: "body must include string from, target, and text" };
+    ctx.response.body = { message: "body must include string gym, target, and text" };
     return;
   }
 
   const gym = normalizeGym(b.gym as string);
-  const from = normalizeName(b.from as string);
+  const from = typeof b.from === "string" ? normalizeName(b.from as string) : "";
   const target = normalizeName(b.target as string);
   const text = (b.text as string).trim();
 
@@ -1161,23 +1167,16 @@ router.post("/api/sessions/note", async (ctx: Ctx) => {
   if (
     typeof b.gym !== "string" ||
     typeof b.session_id !== "string" ||
-    typeof b.from !== "string" ||
     typeof b.text !== "string"
   ) {
     ctx.response.status = 400;
-    ctx.response.body = { message: "body must include string gym, session_id, from, and text" };
+    ctx.response.body = { message: "body must include string gym, session_id, and text" };
     return;
   }
 
   const gym = normalizeGym(b.gym as string);
-  const from = normalizeName(b.from as string);
+  const from = typeof b.from === "string" ? normalizeName(b.from as string) : "";
   const text = (b.text as string).trim();
-
-  if (!from) {
-    ctx.response.status = 400;
-    ctx.response.body = { message: "from cannot be empty" };
-    return;
-  }
 
   if (!text) {
     ctx.response.status = 400;
@@ -1194,7 +1193,7 @@ router.post("/api/sessions/note", async (ctx: Ctx) => {
     const allowedMessages = [
       "scheduled session not found",
       "can only add notes to future scheduled sessions",
-      "from and text are required",
+      "text is required",
     ];
     ctx.response.status = allowedMessages.includes(rawMessage) ? 400 : 400;
     ctx.response.body = { message: allowedMessages.includes(rawMessage) ? rawMessage : "unable to add note" };

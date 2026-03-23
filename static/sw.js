@@ -1,4 +1,4 @@
-const CACHE_NAME = "clymbe-v2";
+const CACHE_NAME = "clymbe-v3";
 const STATIC_ASSETS = [
   "/",
   "/index.html",
@@ -35,6 +35,12 @@ self.addEventListener("fetch", (event) => {
 
   if (url.pathname.startsWith("/api/")) {
     if (url.pathname === "/api/healthz") return;
+    event.respondWith(networkFirst(event.request));
+    return;
+  }
+
+  // Always prefer fresh HTML for app shell so feature rollouts are visible quickly.
+  if (event.request.mode === "navigate") {
     event.respondWith(networkFirst(event.request));
     return;
   }

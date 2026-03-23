@@ -759,7 +759,7 @@
               <select id="gymSelect" class="title-select" aria-label="Select gym location">
               </select>
             </h1>
-            <p class="hint">plan your climb in plain english, schedule future sessions, leave notes, and pick colors.</p>
+            <p class="hint">let others know when you are climbing. uses ai to turn natural language to dates and times</p>
           </div>
         </div>
         <div class="row">
@@ -819,7 +819,7 @@
     </footer>
     <script>
       if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("/sw.js").catch(() => {});
+        navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).catch(() => {});
       }
 
       const NAME_STORAGE_KEY = "clymbe_checkin_name";
@@ -1180,6 +1180,27 @@
         return `${date} ${start} - ${end}`;
       };
 
+      const escapeHtml = (value) =>
+        String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+
+      const renderNoteHtml = (note, climbName) => {
+        const text = escapeHtml(note?.text || "");
+        const from = normalizeName(note?.from || "");
+        const isSelf = from && from.toLowerCase() === normalizeName(climbName).toLowerCase();
+        if (isSelf) {
+          return `\"${text}\"`;
+        }
+        if (from) {
+          return `<span class="note-from">${escapeHtml(from)}:</span> \"${text}\"`;
+        }
+        return `<span class="note-from">anonymous:</span> \"${text}\"`;
+      };
+
       const renderScheduledSessions = (sessions) => {
         scheduledSessionsEl.innerHTML = "";
         const myName = normalizeName(nameInputEl.value).toLowerCase();
@@ -1241,22 +1262,19 @@
             for (const note of session.notes) {
               const noteSpan = document.createElement("span");
               noteSpan.className = "person-note";
-              const isSelf = note.from.toLowerCase() === session.name.toLowerCase();
-              noteSpan.innerHTML = isSelf
-                ? `"${note.text}"`
-                : `<span class="note-from">${note.from}:</span> "${note.text}"`;
+              noteSpan.innerHTML = renderNoteHtml(note, session.name);
               notesDiv.appendChild(noteSpan);
             }
             item.appendChild(notesDiv);
           }
 
-          // note input for others
-          if (myName && session.name && session.name.toLowerCase() !== myName) {
+          // note input (named if you entered a name, anonymous otherwise)
+          if (session.name) {
             const noteRow = document.createElement("div");
             noteRow.className = "note-input-row";
             const noteIn = document.createElement("input");
             noteIn.type = "text";
-            noteIn.placeholder = "leave a note...";
+            noteIn.placeholder = "leave a note (anonymous if name is blank)...";
             const noteBtn = document.createElement("button");
             noteBtn.className = "secondary";
             noteBtn.textContent = "send";
@@ -1389,10 +1407,7 @@
             for (const note of person.notes) {
               const noteSpan = document.createElement("span");
               noteSpan.className = "person-note";
-              const isSelf = note.from.toLowerCase() === person.name.toLowerCase();
-              noteSpan.innerHTML = isSelf
-                ? `"${note.text}"`
-                : `<span class="note-from">${note.from}:</span> "${note.text}"`;
+              noteSpan.innerHTML = renderNoteHtml(note, person.name);
               notesDiv.appendChild(noteSpan);
             }
             itemEl.appendChild(notesDiv);
@@ -1424,13 +1439,13 @@
 
           itemEl.appendChild(reactionsDiv);
 
-          // note input for others
-          if (myName && !isMe) {
+          // note input (named if you entered a name, anonymous otherwise)
+          if (person.name) {
             const noteRow = document.createElement("div");
             noteRow.className = "note-input-row";
             const noteIn = document.createElement("input");
             noteIn.type = "text";
-            noteIn.placeholder = "leave a note...";
+            noteIn.placeholder = "leave a note (anonymous if name is blank)...";
             const noteBtn = document.createElement("button");
             noteBtn.className = "secondary";
             noteBtn.textContent = "send";
@@ -1608,16 +1623,12 @@
 
       async function sendNote(targetName, text) {
         const myName = normalizeName(nameInputEl.value);
-        if (!myName) {
-          messageEl.textContent = "enter your name first";
-          return;
-        }
         try {
           const gym = getSelectedGym();
           const response = await fetch("/api/note", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ gym, from: myName, target: targetName, text }),
+            body: JSON.stringify({ gym, ...(myName ? { from: myName } : {}), target: targetName, text }),
           });
           if (!response.ok) {
             const errorBody = await response.json().catch(() => ({ message: "note failed" }));
@@ -1635,16 +1646,12 @@
 
       async function sendSessionNote(sessionId, text) {
         const myName = normalizeName(nameInputEl.value);
-        if (!myName) {
-          messageEl.textContent = "enter your name first";
-          return;
-        }
         try {
           const gym = getSelectedGym();
           const response = await fetch("/api/sessions/note", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ gym, session_id: sessionId, from: myName, text }),
+            body: JSON.stringify({ gym, session_id: sessionId, ...(myName ? { from: myName } : {}), text }),
           });
           if (!response.ok) {
             const errorBody = await response.json().catch(() => ({ message: "note failed" }));
