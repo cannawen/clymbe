@@ -477,13 +477,7 @@ const sessionStore = {
       throw new Error("can only add notes to future scheduled sessions");
     }
     const notes = session.notes ? [...session.notes] : [];
-    const existingIdx = notes.findIndex((n) => namesEqual(n.from, normalizedFrom));
-    const newNote = { from: normalizedFrom, text };
-    if (existingIdx !== -1) {
-      notes[existingIdx] = newNote;
-    } else {
-      notes.push(newNote);
-    }
+    notes.push({ from: normalizedFrom, text });
     const updated: ScheduledSession = { ...session, notes, updated_at: new Date().toISOString() };
     await this.write(updated);
     return updated;
@@ -610,14 +604,7 @@ const store = {
 
     const person = { ...current.people_here[targetIndex] };
     const notes = person.notes ? [...person.notes] : [];
-    // Replace existing note from this person, or add new
-    const existingIdx = notes.findIndex((n) => namesEqual(n.from, normalizedFrom));
-    const newNote = { from: normalizedFrom, text };
-    if (existingIdx !== -1) {
-      notes[existingIdx] = newNote;
-    } else {
-      notes.push(newNote);
-    }
+    notes.push({ from: normalizedFrom, text });
     person.notes = notes;
 
     const peopleHere = [...current.people_here];
