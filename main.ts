@@ -41,7 +41,6 @@ type ScheduledSession = {
   id: string;
   gym: string;
   name: string;
-  note?: string;
   notes?: Note[];
   details_text: string;
   standardized_details: StandardizedSessionDetails;
@@ -72,6 +71,53 @@ const namesEqual = (left: string, right: string): boolean =>
 const buildPresenceNote = (customNote: string | undefined): string | undefined => {
   const trimmedCustom = customNote?.trim();
   return trimmedCustom || undefined;
+};
+
+const normalizeNotes = (notes: Note[] | undefined): Note[] => {
+  if (!Array.isArray(notes)) {
+    return [];
+  }
+
+  return notes
+    .map((note) => {
+      const text = typeof note.text === "string" ? note.text.trim() : "";
+      const from = typeof note.from === "string" ? normalizeName(note.from) : "";
+      if (!text) return null;
+      return from ? { from, text } : { text };
+    })
+    .filter((note): note is Note => note !== null);
+};
+
+const noteKey = (note: Note): string => {
+  const from = typeof note.from === "string" ? note.from.trim().toLowerCase() : "";
+  return `${from}|${note.text.trim().toLowerCase()}`;
+};
+
+const mergeUniqueNotes = (baseNotes: Note[], incomingNotes: Note[]): Note[] => {
+  const merged = [...baseNotes];
+  const seen = new Set(merged.map(noteKey));
+  for (const note of incomingNotes) {
+    const key = noteKey(note);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(note);
+  }
+  return merged;
+};
+
+const getSessionNotes = (session: ScheduledSession & { note?: string }): Note[] => {
+  const normalized = normalizeNotes(session.notes);
+  const legacyNote = typeof session.note === "string" ? session.note.trim() : "";
+  if (!legacyNote) {
+    return normalized;
+  }
+  const legacyFrom = normalizeName(session.name);
+  return mergeUniqueNotes(normalized, [{ from: legacyFrom, text: legacyNote }]);
+};
+
+const getSelfNoteText = (name: string, notes: Note[]): string | undefined => {
+  const selfNote = notes.find((note) => typeof note.from === "string" && namesEqual(note.from, name));
+  return selfNote?.text;
 };
 
 const normalizeStatus = (value: unknown): Status => {
@@ -404,12 +450,15 @@ const pushStore = {
 
 const sessionStore = {
   async write(session: ScheduledSession): Promise<void> {
+    const { note: _legacyNote, ...rest } = session as ScheduledSession & { note?: string };
+    const notes = getSessionNotes(session);
     await kv.set(
       [...SCHEDULED_SESSION_KEY_PREFIX, normalizeGym(session.gym), session.id],
       {
-        ...session,
+        ...rest,
         gym: normalizeGym(session.gym),
         name: normalizeName(session.name),
+        ...(notes.length > 0 ? { notes } : {}),
       },
     );
   },
@@ -424,10 +473,12 @@ const sessionStore = {
       if (!entry.value) continue;
       const value = entry.value;
       if (!value.id || !value.name || !value.start_at || !value.end_at) continue;
+      const notes = getSessionNotes(value);
       sessions.push({
         ...value,
         gym: normalizedGym,
         name: normalizeName(value.name),
+        ...(notes.length > 0 ? { notes } : {}),
       });
     }
     sessions.sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
@@ -448,10 +499,12 @@ const sessionStore = {
       id,
     ]);
     if (!entry.value) return null;
+    const notes = getSessionNotes(entry.value);
     return {
       ...entry.value,
       gym: normalizedGym,
       name: normalizeName(entry.value.name),
+      ...(notes.length > 0 ? { notes } : {}),
     };
   },
   async listScheduledForNameOnDateKey(
@@ -520,7 +573,12 @@ const store = {
     name: string,
     isHere: boolean,
     note?: string,
-    options?: { hours?: number; checkoutAtIso?: string; checkedInAtIso?: string },
+    options?: {
+      hours?: number;
+      checkoutAtIso?: string;
+      checkedInAtIso?: string;
+      initialNotes?: Note[];
+    },
   ): Promise<Status> {
     const normalizedName = normalizeName(name);
     if (normalizedName.length === 0) {
@@ -541,6 +599,7 @@ const store = {
         ? new Date(new Date(now).getTime() + options.hours * 60 * 60 * 1000).toISOString()
         : undefined;
     const presenceNote = buildPresenceNote(note);
+    const initialNotes = normalizeNotes(options?.initialNotes);
     const effectiveCheckedInAt =
       options?.checkedInAtIso && isValidIsoDate(options.checkedInAtIso)
         ? new Date(options.checkedInAtIso).toISOString()
@@ -548,12 +607,21 @@ const store = {
 
     if (isHere && existingIndex === -1) {
       const entry: PersonHere = { name: normalizedName, checked_in_at: effectiveCheckedInAt };
-      if (presenceNote) entry.notes = [{ from: normalizedName, text: presenceNote }];
+      const seededNotes = [...initialNotes];
+      if (presenceNote) {
+        const selfNote: Note = { from: normalizedName, text: presenceNote };
+        const selfIdx = seededNotes.findIndex((n) =>
+          typeof n.from === "string" && namesEqual(n.from, normalizedName)
+        );
+        if (selfIdx !== -1) seededNotes[selfIdx] = selfNote;
+        else seededNotes.push(selfNote);
+      }
+      if (seededNotes.length > 0) entry.notes = seededNotes;
       if (checkoutAt) entry.checkout_at = checkoutAt;
       peopleHere.push(entry);
     } else if (isHere && existingIndex !== -1) {
       const existing = peopleHere[existingIndex];
-      const updatedNotes = existing.notes ? [...existing.notes] : [];
+      const updatedNotes = mergeUniqueNotes(existing.notes ? [...existing.notes] : [], initialNotes);
       const selfIdx = updatedNotes.findIndex((n) =>
         typeof n.from === "string" && namesEqual(n.from, normalizedName)
       );
@@ -1036,7 +1104,7 @@ router.post("/api/sessions/add", async (ctx: Ctx) => {
       id,
       gym,
       name,
-      ...(note ? { note } : {}),
+      ...(note ? { notes: [{ from: name, text: note }] } : {}),
       details_text: schedulingText,
       standardized_details: standardizedDetails,
       start_at: sessionStart.toISOString(),
@@ -1047,10 +1115,18 @@ router.post("/api/sessions/add", async (ctx: Ctx) => {
     };
 
     if (session.status === "checked_in") {
-      const updatedStatus = await store.setPresence(gym, name, true, note || undefined, {
+      const sessionNotes = getSessionNotes(session);
+      const updatedStatus = await store.setPresence(
+        gym,
+        name,
+        true,
+        getSelfNoteText(name, sessionNotes),
+        {
         checkoutAtIso: session.end_at,
         checkedInAtIso: now.toISOString(),
-      });
+          initialNotes: sessionNotes,
+        },
+      );
       session.checked_in_at = now.toISOString();
       await sessionStore.write(session);
       ctx.response.body = {
@@ -1214,9 +1290,11 @@ async function processScheduledSessionsForGym(gym: string): Promise<void> {
     const endTs = new Date(session.end_at).getTime();
 
     if (session.status === "scheduled" && startTs <= nowTs) {
-      await store.setPresence(gym, session.name, true, session.note, {
+      const sessionNotes = getSessionNotes(session);
+      await store.setPresence(gym, session.name, true, getSelfNoteText(session.name, sessionNotes), {
         checkoutAtIso: session.end_at,
         checkedInAtIso: new Date(Math.max(startTs, nowTs)).toISOString(),
+        initialNotes: sessionNotes,
       });
       session.status = "checked_in";
       session.checked_in_at = now.toISOString();

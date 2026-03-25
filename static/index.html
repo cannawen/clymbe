@@ -585,10 +585,6 @@
         color: var(--text-dim);
         font-size: 0.82rem;
       }
-      .session-details {
-        color: var(--text-muted);
-        font-size: 0.82rem;
-      }
       .session-trash {
         width: 1.65rem;
         height: 1.65rem;
@@ -1249,12 +1245,6 @@
           head.appendChild(right);
           item.appendChild(head);
 
-          const details = document.createElement("div");
-          details.className = "session-details";
-          const detailsText = session.details_text || session.standardized_details?.inferred_from_text || "scheduled session";
-          details.textContent = detailsText;
-          item.appendChild(details);
-
           // notes on this session
           if (session.notes && session.notes.length > 0) {
             const notesDiv = document.createElement("div");
@@ -1445,7 +1435,7 @@
             noteRow.className = "note-input-row";
             const noteIn = document.createElement("input");
             noteIn.type = "text";
-            noteIn.placeholder = "leave a note (anonymous if name is blank)...";
+            noteIn.placeholder = "leave a note";
             const noteBtn = document.createElement("button");
             noteBtn.className = "secondary";
             noteBtn.textContent = "send";
