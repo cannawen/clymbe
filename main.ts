@@ -42,6 +42,7 @@ type ScheduledSession = {
   gym: string;
   name: string;
   notes?: Note[];
+  reactions?: Record<string, string[]>;
   details_text: string;
   standardized_details: StandardizedSessionDetails;
   start_at: string;
@@ -53,25 +54,12 @@ type ScheduledSession = {
   checked_out_at?: string;
 };
 
-const createStatus = (): Status => ({
-  gym_name: gymName,
-  people_here: [],
-  last_check_in: null,
-  check_in_count: 0,
-  updated_at: new Date().toISOString()
-});
-
 const normalizeName = (name: string): string => name.trim().replace(/\s+/g, " ");
 
 const normalizeGym = (gym: string): string => gym.trim().replace(/\s+/g, " ").toLowerCase();
 
 const namesEqual = (left: string, right: string): boolean =>
   left.toLowerCase() === right.toLowerCase();
-
-const buildPresenceNote = (customNote: string | undefined): string | undefined => {
-  const trimmedCustom = customNote?.trim();
-  return trimmedCustom || undefined;
-};
 
 const normalizeNotes = (notes: Note[] | undefined): Note[] => {
   if (!Array.isArray(notes)) {
@@ -115,95 +103,6 @@ const getSessionNotes = (session: ScheduledSession & { note?: string }): Note[] 
   return mergeUniqueNotes(normalized, [{ from: legacyFrom, text: legacyNote }]);
 };
 
-const getSelfNoteText = (name: string, notes: Note[]): string | undefined => {
-  const selfNote = notes.find((note) => typeof note.from === "string" && namesEqual(note.from, name));
-  return selfNote?.text;
-};
-
-const normalizeStatus = (value: unknown): Status => {
-  if (typeof value !== "object" || value === null) {
-    return createStatus();
-  }
-
-  const now = new Date().toISOString();
-  const candidate = value as Record<string, unknown>;
-  const lastCheckIn =
-    typeof candidate.last_check_in === "string" ? candidate.last_check_in : null;
-  const checkInCount =
-    typeof candidate.check_in_count === "number" && Number.isFinite(candidate.check_in_count)
-      ? candidate.check_in_count
-      : 0;
-  const updatedAt =
-    typeof candidate.updated_at === "string"
-      ? candidate.updated_at
-      : new Date().toISOString();
-  const storedGymName =
-    typeof candidate.gym_name === "string" ? normalizeGym(candidate.gym_name) : gymName;
-
-  const rawPeople = Array.isArray(candidate.people_here) ? candidate.people_here : [];
-  const peopleMap = new Map<string, PersonHere>();
-  for (const person of rawPeople) {
-    if (typeof person !== "object" || person === null) {
-      continue;
-    }
-
-    const candidatePerson = person as Record<string, unknown>;
-    if (typeof candidatePerson.name !== "string") {
-      continue;
-    }
-    const normalized = normalizeName(candidatePerson.name);
-    if (normalized.length === 0) {
-      continue;
-    }
-
-    const entry: PersonHere = {
-      name: normalized,
-      checked_in_at:
-        typeof candidatePerson.checked_in_at === "string"
-          ? candidatePerson.checked_in_at
-          : lastCheckIn ?? now
-    };
-    if (typeof candidatePerson.checkout_at === "string") {
-      entry.checkout_at = candidatePerson.checkout_at;
-    }
-    if (Array.isArray(candidatePerson.notes)) {
-      const validNotes = (candidatePerson.notes as unknown[])
-        .filter((n): n is Record<string, unknown> =>
-          typeof n === "object" && n !== null &&
-          typeof (n as Record<string, unknown>).text === "string"
-        )
-        .map((n) => {
-          const rawFrom = typeof n.from === "string" ? normalizeName(n.from) : "";
-          return {
-            ...(rawFrom ? { from: rawFrom } : {}),
-            text: (n.text as string).trim(),
-          };
-        })
-        .filter((n) => n.text.length > 0);
-      if (validNotes.length > 0) entry.notes = validNotes;
-    } else if (typeof candidatePerson.note === "string" && candidatePerson.note.length > 0) {
-      // migrate old single-note format
-      entry.notes = [{ from: normalized, text: candidatePerson.note }];
-    }
-    if (candidatePerson.reactions && typeof candidatePerson.reactions === "object") {
-      entry.reactions = candidatePerson.reactions as Record<string, string[]>;
-    }
-    peopleMap.set(normalized.toLowerCase(), entry);
-  }
-
-  const peopleHere = [...peopleMap.values()].sort((left, right) =>
-    left.name.localeCompare(right.name)
-  );
-
-  return {
-    gym_name: storedGymName,
-    people_here: peopleHere,
-    last_check_in: lastCheckIn,
-    check_in_count: checkInCount,
-    updated_at: updatedAt
-  };
-};
-
 const kvPath = Deno.env.get("DENO_KV_PATH");
 const kv = await Deno.openKv(kvPath);
 const STATUS_KEY_PREFIX = ["status"];
@@ -244,6 +143,7 @@ webpush.setVapidDetails(vapidSubject, vapidKeys.publicKey, vapidKeys.privateKey)
 const isValidIsoDate = (value: string): boolean => !Number.isNaN(new Date(value).getTime());
 
 const REMINDER_TIME_ZONE = "America/New_York";
+const BACKLOG_TIME_ZONE = Deno.env.get("BACKLOG_TIME_ZONE")?.trim() || REMINDER_TIME_ZONE;
 
 const getDateKeyInTimeZone = (date: Date, timeZone: string): string => {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -279,6 +179,38 @@ const getHourInTimeZone = (date: Date, timeZone: string): number => {
     hour12: false,
   }).format(date);
   return Number(hour);
+};
+
+const getWeekdayInTimeZone = (date: Date, timeZone: string): number => {
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+  }).format(date);
+  const map: Record<string, number> = {
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+    Sun: 7,
+  };
+  return map[weekday] ?? 1;
+};
+
+const getWeekStartDateKeyInTimeZone = (date: Date, timeZone: string): string => {
+  const dateKey = getDateKeyInTimeZone(date, timeZone);
+  const weekday = getWeekdayInTimeZone(date, timeZone);
+  return addDaysToDateKey(dateKey, -(weekday - 1));
+};
+
+const isSessionBeforeWeekStart = (
+  session: ScheduledSession,
+  weekStartDateKey: string,
+  timeZone: string,
+): boolean => {
+  const endDateKey = getDateKeyInTimeZone(new Date(session.end_at), timeZone);
+  return endDateKey < weekStartDateKey;
 };
 
 const sanitizeGeminiJson = (raw: string): string =>
@@ -491,6 +423,11 @@ const sessionStore = {
       session.status === "scheduled" && new Date(session.start_at).getTime() > nowTs
     );
   },
+  async listBacklog(gym: string, now = new Date()): Promise<ScheduledSession[]> {
+    const weekStartDateKey = getWeekStartDateKeyInTimeZone(now, BACKLOG_TIME_ZONE);
+    const sessions = await this.listAll(gym);
+    return sessions.filter((session) => !isSessionBeforeWeekStart(session, weekStartDateKey, BACKLOG_TIME_ZONE));
+  },
   async getById(gym: string, id: string): Promise<ScheduledSession | null> {
     const normalizedGym = normalizeGym(gym);
     const entry = await kv.get<ScheduledSession>([
@@ -531,8 +468,8 @@ const sessionStore = {
     if (!session) {
       throw new Error("scheduled session not found");
     }
-    if (session.status !== "scheduled") {
-      throw new Error("can only add notes to future scheduled sessions");
+    if (session.status === "cancelled") {
+      throw new Error("cannot add notes to cancelled sessions");
     }
     const notes = session.notes ? [...session.notes] : [];
     notes.push(normalizedFrom ? { from: normalizedFrom, text } : { text });
@@ -540,235 +477,189 @@ const sessionStore = {
     await this.write(updated);
     return updated;
   },
-};
-
-const ALLOWED_COLORS = ["#f9a8d4", "#a5b4fc", "#86efac", "#fde68a", "#c4b5fd"];
-
-const store = {
-  async read(gym: string): Promise<Status> {
-    const normalizedGym = normalizeGym(gym);
-    const entry = await kv.get<Status>([...STATUS_KEY_PREFIX, normalizedGym]);
-    if (entry.value) {
-      return normalizeStatus(entry.value);
-    }
-    const initial: Status = {
-      gym_name: normalizedGym,
-      people_here: [],
-      last_check_in: null,
-      check_in_count: 0,
-      updated_at: new Date().toISOString()
-    };
-    await kv.set([...STATUS_KEY_PREFIX, normalizedGym], initial);
-    return initial;
-  },
-  async write(gym: string, status: Status): Promise<void> {
-    const normalizedGym = normalizeGym(gym);
-    await kv.set([...STATUS_KEY_PREFIX, normalizedGym], {
-      ...status,
-      gym_name: normalizeGym(status.gym_name)
-    });
-  },
-  async setPresence(
+  async addNoteToActiveSession(
     gym: string,
-    name: string,
-    isHere: boolean,
-    note?: string,
-    options?: {
-      hours?: number;
-      checkoutAtIso?: string;
-      checkedInAtIso?: string;
-      initialNotes?: Note[];
-    },
-  ): Promise<Status> {
-    const normalizedName = normalizeName(name);
-    if (normalizedName.length === 0) {
-      throw new Error("name is required");
-    }
-
-    const current = await this.read(gym);
-    const now = new Date().toISOString();
-    const existingIndex = current.people_here.findIndex((person) =>
-      namesEqual(person.name, normalizedName)
-    );
-
-    const peopleHere = [...current.people_here];
-    const checkoutAt =
-      options?.checkoutAtIso && isValidIsoDate(options.checkoutAtIso)
-        ? new Date(options.checkoutAtIso).toISOString()
-        : options?.hours && options.hours > 0
-        ? new Date(new Date(now).getTime() + options.hours * 60 * 60 * 1000).toISOString()
-        : undefined;
-    const presenceNote = buildPresenceNote(note);
-    const initialNotes = normalizeNotes(options?.initialNotes);
-    const effectiveCheckedInAt =
-      options?.checkedInAtIso && isValidIsoDate(options.checkedInAtIso)
-        ? new Date(options.checkedInAtIso).toISOString()
-        : now;
-
-    if (isHere && existingIndex === -1) {
-      const entry: PersonHere = { name: normalizedName, checked_in_at: effectiveCheckedInAt };
-      const seededNotes = [...initialNotes];
-      if (presenceNote) {
-        const selfNote: Note = { from: normalizedName, text: presenceNote };
-        const selfIdx = seededNotes.findIndex((n) =>
-          typeof n.from === "string" && namesEqual(n.from, normalizedName)
-        );
-        if (selfIdx !== -1) seededNotes[selfIdx] = selfNote;
-        else seededNotes.push(selfNote);
-      }
-      if (seededNotes.length > 0) entry.notes = seededNotes;
-      if (checkoutAt) entry.checkout_at = checkoutAt;
-      peopleHere.push(entry);
-    } else if (isHere && existingIndex !== -1) {
-      const existing = peopleHere[existingIndex];
-      const updatedNotes = mergeUniqueNotes(existing.notes ? [...existing.notes] : [], initialNotes);
-      const selfIdx = updatedNotes.findIndex((n) =>
-        typeof n.from === "string" && namesEqual(n.from, normalizedName)
-      );
-      if (presenceNote) {
-        if (selfIdx !== -1) updatedNotes[selfIdx] = { from: normalizedName, text: presenceNote };
-        else updatedNotes.push({ from: normalizedName, text: presenceNote });
-      } else if (selfIdx !== -1) {
-        updatedNotes.splice(selfIdx, 1);
-      }
-      const updatedPerson: PersonHere = {
-        ...existing,
-        name: normalizedName,
-        ...(updatedNotes.length > 0 ? { notes: updatedNotes } : {})
-      };
-      if (checkoutAt) {
-        updatedPerson.checkout_at = checkoutAt;
-      } else {
-        delete updatedPerson.checkout_at;
-      }
-      peopleHere[existingIndex] = updatedPerson;
-    } else if (!isHere && existingIndex !== -1) {
-      peopleHere.splice(existingIndex, 1);
-    }
-
-    peopleHere.sort((left, right) => left.name.localeCompare(right.name));
-
-    const next: Status = {
-      ...current,
-      people_here: peopleHere,
-      updated_at: now
-    };
-
-    if (isHere && existingIndex === -1) {
-      next.last_check_in = now;
-      next.check_in_count = current.check_in_count + 1;
-    }
-
-    await this.write(gym, next);
-    return next;
-  },
-  async addNote(gym: string, targetName: string, fromName: string | undefined, text: string): Promise<Status> {
+    targetName: string,
+    fromName: string | undefined,
+    text: string,
+    now = new Date(),
+  ): Promise<ScheduledSession> {
     const normalizedTarget = normalizeName(targetName);
-    const normalizedFrom = typeof fromName === "string" ? normalizeName(fromName) : "";
-    if (!normalizedTarget || !text) {
-      throw new Error("target and text are required");
+    const nowTs = now.getTime();
+    const sessions = await this.listAll(gym);
+    const candidates = sessions.filter((session) => {
+      if (session.status === "cancelled") return false;
+      if (!namesEqual(session.name, normalizedTarget)) return false;
+      const startTs = new Date(session.start_at).getTime();
+      const endTs = new Date(session.end_at).getTime();
+      return startTs <= nowTs && nowTs < endTs;
+    });
+
+    if (candidates.length === 0) {
+      throw new Error("person is not in an active session");
     }
 
-    const current = await this.read(gym);
-    const targetIndex = current.people_here.findIndex((p) =>
-      namesEqual(p.name, normalizedTarget)
-    );
-    if (targetIndex === -1) {
-      throw new Error("person is not checked in");
-    }
-
-    const person = { ...current.people_here[targetIndex] };
-    const notes = person.notes ? [...person.notes] : [];
-    notes.push(normalizedFrom ? { from: normalizedFrom, text } : { text });
-    person.notes = notes;
-
-    const peopleHere = [...current.people_here];
-    peopleHere[targetIndex] = person;
-
-    const next: Status = { ...current, people_here: peopleHere, updated_at: new Date().toISOString() };
-    await this.write(gym, next);
-    return next;
+    candidates.sort((a, b) => new Date(b.start_at).getTime() - new Date(a.start_at).getTime());
+    return await this.addNote(gym, candidates[0].id, fromName, text);
   },
-  async addReaction(gym: string, targetName: string, reactorName: string, emoji: string): Promise<Status> {
+  async toggleReactionOnActiveSession(
+    gym: string,
+    targetName: string,
+    reactorName: string,
+    emoji: string,
+    now = new Date(),
+  ): Promise<ScheduledSession> {
     const normalizedTarget = normalizeName(targetName);
     const normalizedReactor = normalizeName(reactorName);
+    const nowTs = now.getTime();
+    const sessions = await this.listAll(gym);
+    const candidates = sessions.filter((session) => {
+      if (session.status === "cancelled") return false;
+      if (!namesEqual(session.name, normalizedTarget)) return false;
+      const startTs = new Date(session.start_at).getTime();
+      const endTs = new Date(session.end_at).getTime();
+      return startTs <= nowTs && nowTs < endTs;
+    });
 
-    const current = await this.read(gym);
-    const targetIndex = current.people_here.findIndex((p) =>
-      namesEqual(p.name, normalizedTarget)
-    );
-    if (targetIndex === -1) {
-      throw new Error("person is not checked in");
+    if (candidates.length === 0) {
+      throw new Error("person is not in an active session");
     }
 
-    const person = { ...current.people_here[targetIndex] };
-    const reactions = { ...(person.reactions || {}) };
-
+    candidates.sort((a, b) => new Date(b.start_at).getTime() - new Date(a.start_at).getTime());
+    const session = candidates[0];
+    const reactions = { ...(session.reactions || {}) };
     const reactors = reactions[emoji] ? [...reactions[emoji]] : [];
-
     const existingIdx = reactors.findIndex((r) => namesEqual(r, normalizedReactor));
     if (existingIdx !== -1) {
       reactors.splice(existingIdx, 1);
     } else {
       reactors.push(normalizedReactor);
     }
-
     if (reactors.length === 0) {
       delete reactions[emoji];
     } else {
       reactions[emoji] = reactors;
     }
-
-    person.reactions = Object.keys(reactions).length > 0 ? reactions : undefined;
-
-    const peopleHere = [...current.people_here];
-    peopleHere[targetIndex] = person;
-
-    const next: Status = { ...current, people_here: peopleHere, updated_at: new Date().toISOString() };
-    await this.write(gym, next);
-    return next;
-  },
-  async reset(gym: string): Promise<Status> {
-    const next: Status = {
-      gym_name: gym,
-      people_here: [],
-      last_check_in: null,
-      check_in_count: 0,
-      updated_at: new Date().toISOString()
+    const updated: ScheduledSession = {
+      ...session,
+      reactions: Object.keys(reactions).length > 0 ? reactions : undefined,
+      updated_at: new Date().toISOString(),
     };
-    await this.write(gym, next);
-    return next;
+    await this.write(updated);
+    return updated;
   },
-  async autoCheckout(gym: string): Promise<void> {
-    const current = await this.read(gym);
-    const now = new Date();
-    const updated = current.people_here.filter((person) => {
-      if (!person.checkout_at) return true;
-      const checkoutTime = new Date(person.checkout_at);
-      return now < checkoutTime;
-    });
+  async endActiveSessionsForName(gym: string, name: string, now = new Date()): Promise<number> {
+    const normalizedName = normalizeName(name);
+    const nowIso = now.toISOString();
+    const nowTs = now.getTime();
+    const sessions = await this.listAll(gym);
+    let updatedCount = 0;
 
-    if (updated.length !== current.people_here.length) {
-      const next: Status = {
-        ...current,
-        people_here: updated,
-        updated_at: new Date().toISOString()
+    for (const session of sessions) {
+      if (session.status === "cancelled") continue;
+      if (!namesEqual(session.name, normalizedName)) continue;
+      const startTs = new Date(session.start_at).getTime();
+      const endTs = new Date(session.end_at).getTime();
+      if (!(startTs <= nowTs && nowTs < endTs)) continue;
+      const updated: ScheduledSession = {
+        ...session,
+        end_at: nowIso,
+        updated_at: nowIso,
       };
-      await this.write(gym, next);
+      await this.write(updated);
+      updatedCount += 1;
     }
-  }
+
+    return updatedCount;
+  },
+  async pruneBacklog(gym: string, now = new Date()): Promise<void> {
+    const normalizedGym = normalizeGym(gym);
+    const weekStartDateKey = getWeekStartDateKeyInTimeZone(now, BACKLOG_TIME_ZONE);
+    const sessions = await this.listAll(normalizedGym);
+    await Promise.all(sessions
+      .filter((session) => isSessionBeforeWeekStart(session, weekStartDateKey, BACKLOG_TIME_ZONE))
+      .map((session) => kv.delete([...SCHEDULED_SESSION_KEY_PREFIX, normalizedGym, session.id])));
+  },
+  async clearGym(gym: string): Promise<void> {
+    const normalizedGym = normalizeGym(gym);
+    for await (const entry of kv.list({ prefix: [...SCHEDULED_SESSION_KEY_PREFIX, normalizedGym] })) {
+      await kv.delete(entry.key);
+    }
+  },
 };
+
+const buildPeopleHereFromSessions = (sessions: ScheduledSession[], now = new Date()): PersonHere[] => {
+  const nowTs = now.getTime();
+  const byName = new Map<string, PersonHere & { _start_ts: number }>();
+
+  for (const session of sessions) {
+    if (session.status === "cancelled") continue;
+    const startTs = new Date(session.start_at).getTime();
+    const endTs = new Date(session.end_at).getTime();
+    if (!(startTs <= nowTs && nowTs < endTs)) continue;
+    const key = session.name.toLowerCase();
+    const existing = byName.get(key);
+    if (existing && existing._start_ts > startTs) {
+      continue;
+    }
+    byName.set(key, {
+      name: session.name,
+      checked_in_at: session.start_at,
+      checkout_at: session.end_at,
+      ...(session.notes && session.notes.length > 0 ? { notes: session.notes } : {}),
+      ...(session.reactions && Object.keys(session.reactions).length > 0 ? { reactions: session.reactions } : {}),
+      _start_ts: startTs,
+    });
+  }
+
+  return [...byName.values()]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(({ _start_ts: _drop, ...person }) => person);
+};
+
+const buildUnifiedStatusFromSessions = (
+  gym: string,
+  sessions: ScheduledSession[],
+  now = new Date(),
+): Status & { scheduled_sessions: ScheduledSession[]; sessions: ScheduledSession[] } => {
+  const peopleHere = buildPeopleHereFromSessions(sessions, now);
+  const nowTs = now.getTime();
+  const nonCancelled = sessions.filter((session) => session.status !== "cancelled");
+  const scheduledSessions = nonCancelled
+    .filter((session) => new Date(session.start_at).getTime() > nowTs)
+    .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+  const lastCheckIn = nonCancelled
+    .map((session) => session.start_at)
+    .filter((iso) => isValidIsoDate(iso))
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] ?? null;
+
+  return {
+    gym_name: normalizeGym(gym),
+    people_here: peopleHere,
+    last_check_in: lastCheckIn,
+    check_in_count: nonCancelled.length,
+    updated_at: now.toISOString(),
+    scheduled_sessions: scheduledSessions,
+    sessions,
+  };
+};
+
+const buildBacklogStatusForGym = async (
+  gym: string,
+): Promise<Status & { scheduled_sessions: ScheduledSession[]; sessions: ScheduledSession[] }> => {
+  await processScheduledSessionsForGym(gym);
+  const sessions = await sessionStore.listBacklog(gym);
+  return buildUnifiedStatusFromSessions(gym, sessions);
+};
+
+const ALLOWED_COLORS = ["#f9a8d4", "#a5b4fc", "#86efac", "#fde68a", "#c4b5fd"];
 
 type Ctx = RouterContext<string>;
 const router = new Router();
 
 router.get("/api/status", async (ctx: Ctx) => {
   const gym = normalizeGym(ctx.request.url.searchParams.get("gym") || gymName);
-  await processScheduledSessionsForGym(gym);
-  await store.autoCheckout(gym);
-  const status = await store.read(gym);
-  const scheduledSessions = await sessionStore.listFuture(gym);
-  ctx.response.body = { ...status, scheduled_sessions: scheduledSessions };
+  ctx.response.body = await buildBacklogStatusForGym(gym);
 });
 
 router.post("/api/presence", async (ctx: Ctx) => {
@@ -803,17 +694,41 @@ router.post("/api/presence", async (ctx: Ctx) => {
   const gym = normalizeGym(payload.gym);
   const note = typeof payload.note === "string" ? payload.note.trim() : undefined;
   try {
-    const hours = typeof (body as Record<string, unknown>).hours === "number"
+    const hoursRaw = typeof (body as Record<string, unknown>).hours === "number"
       ? (body as Record<string, unknown>).hours as number
       : undefined;
-    const updatedStatus = await store.setPresence(
-      gym,
-      payload.name,
-      payload.is_here,
-      note || undefined,
-      { hours },
-    );
-    ctx.response.body = updatedStatus;
+    const hours = typeof hoursRaw === "number" && hoursRaw > 0 ? hoursRaw : 1;
+    const now = new Date();
+    if (payload.is_here) {
+      const startAt = now.toISOString();
+      const endAt = new Date(now.getTime() + hours * 60 * 60 * 1000).toISOString();
+      const name = normalizeName(payload.name);
+      if (!name) {
+        throw new Error("name is required");
+      }
+      const createdAt = new Date().toISOString();
+      const session: ScheduledSession = {
+        id: crypto.randomUUID(),
+        gym,
+        name,
+        ...(note ? { notes: [{ from: name, text: note }] } : {}),
+        details_text: note || "manual presence",
+        standardized_details: {
+          arrival_time_iso: startAt,
+          duration_minutes: Math.round(hours * 60),
+          inferred_from_text: "manual presence",
+        },
+        start_at: startAt,
+        end_at: endAt,
+        status: "scheduled",
+        created_at: createdAt,
+        updated_at: createdAt,
+      };
+      await sessionStore.write(session);
+    } else {
+      await sessionStore.endActiveSessionsForName(gym, payload.name, now);
+    }
+    ctx.response.body = await buildBacklogStatusForGym(gym);
   } catch (error) {
     ctx.response.status = 400;
     ctx.response.body = {
@@ -862,8 +777,8 @@ router.post("/api/react", async (ctx: Ctx) => {
   const gym = normalizeGym(b.gym as string);
 
   try {
-    const updatedStatus = await store.addReaction(gym, target, reactor, b.emoji as string);
-    ctx.response.body = updatedStatus;
+    await sessionStore.toggleReactionOnActiveSession(gym, target, reactor, b.emoji as string);
+    ctx.response.body = await buildBacklogStatusForGym(gym);
   } catch (error) {
     ctx.response.status = 400;
     ctx.response.body = {
@@ -911,8 +826,8 @@ router.post("/api/note", async (ctx: Ctx) => {
   }
 
   try {
-    const updatedStatus = await store.addNote(gym, target, from, text);
-    ctx.response.body = updatedStatus;
+    await sessionStore.addNoteToActiveSession(gym, target, from, text);
+    ctx.response.body = await buildBacklogStatusForGym(gym);
   } catch (error) {
     ctx.response.status = 400;
     ctx.response.body = {
@@ -923,7 +838,8 @@ router.post("/api/note", async (ctx: Ctx) => {
 
 router.post("/api/reset", async (ctx: Ctx) => {
   const gym = normalizeGym(ctx.request.url.searchParams.get("gym") || gymName);
-  ctx.response.body = await store.reset(gym);
+  await sessionStore.clearGym(gym);
+  ctx.response.body = buildUnifiedStatusFromSessions(gym, []);
 });
 
 router.get("/api/vapid-public-key", (ctx: Ctx) => {
@@ -1009,7 +925,7 @@ router.post("/api/push/unsubscribe", async (ctx: Ctx) => {
 router.get("/api/sessions", async (ctx: Ctx) => {
   const gym = normalizeGym(ctx.request.url.searchParams.get("gym") || gymName);
   await processScheduledSessionsForGym(gym);
-  ctx.response.body = { sessions: await sessionStore.listFuture(gym) };
+  ctx.response.body = { sessions: await sessionStore.listBacklog(gym) };
 });
 
 router.post("/api/sessions/add", async (ctx: Ctx) => {
@@ -1053,16 +969,32 @@ router.post("/api/sessions/add", async (ctx: Ctx) => {
     return;
   }
 
-  const checkInNowForOneHour = async (reason: string) => {
+  const createSessionWithDefaults = async (reason: string) => {
     const start = new Date(nowIsoInput);
     const end = new Date(start.getTime() + 60 * 60 * 1000);
-    const status = await store.setPresence(gym, name, true, note || undefined, {
-      checkoutAtIso: end.toISOString(),
-      checkedInAtIso: start.toISOString(),
-    });
+    const createdAt = new Date().toISOString();
+    const session: ScheduledSession = {
+      id: crypto.randomUUID(),
+      gym,
+      name,
+      ...(note ? { notes: [{ from: name, text: note }] } : {}),
+      details_text: schedulingText || note || "manual session",
+      standardized_details: {
+        arrival_time_iso: start.toISOString(),
+        duration_minutes: 60,
+        inferred_from_text: reason,
+      },
+      start_at: start.toISOString(),
+      end_at: end.toISOString(),
+      status: "scheduled",
+      created_at: createdAt,
+      updated_at: createdAt,
+    };
+    await sessionStore.write(session);
+    const status = await buildBacklogStatusForGym(gym);
     ctx.response.body = {
       status,
-      scheduled_session: null,
+      scheduled_session: session,
       standardized_details: {
         arrival_time_iso: start.toISOString(),
         duration_minutes: 60,
@@ -1073,7 +1005,7 @@ router.post("/api/sessions/add", async (ctx: Ctx) => {
 
   try {
     if (!schedulingText) {
-      await checkInNowForOneHour("no scheduling details provided; defaulted to 60 minutes");
+      await createSessionWithDefaults("no scheduling details provided; defaulted to 60 minutes");
       return;
     }
 
@@ -1084,7 +1016,7 @@ router.post("/api/sessions/add", async (ctx: Ctx) => {
     });
 
     if (!standardizedDetails) {
-      await checkInNowForOneHour("no schedule found in note; defaulted to 60 minutes");
+      await createSessionWithDefaults("no schedule found in note; defaulted to 60 minutes");
       return;
     }
 
@@ -1109,37 +1041,13 @@ router.post("/api/sessions/add", async (ctx: Ctx) => {
       standardized_details: standardizedDetails,
       start_at: sessionStart.toISOString(),
       end_at: sessionEnd.toISOString(),
-      status: sessionStart.getTime() <= now.getTime() ? "checked_in" : "scheduled",
+      status: "scheduled",
       created_at: createdAt,
       updated_at: createdAt,
     };
 
-    if (session.status === "checked_in") {
-      const sessionNotes = getSessionNotes(session);
-      const updatedStatus = await store.setPresence(
-        gym,
-        name,
-        true,
-        getSelfNoteText(name, sessionNotes),
-        {
-        checkoutAtIso: session.end_at,
-        checkedInAtIso: now.toISOString(),
-          initialNotes: sessionNotes,
-        },
-      );
-      session.checked_in_at = now.toISOString();
-      await sessionStore.write(session);
-      ctx.response.body = {
-        status: updatedStatus,
-        scheduled_session: session,
-        standardized_details: standardizedDetails,
-      };
-      return;
-    }
-
     await sessionStore.write(session);
-    await processScheduledSessionsForGym(gym);
-    const status = await store.read(gym);
+    const status = await buildBacklogStatusForGym(gym);
     ctx.response.body = {
       status,
       scheduled_session: session,
@@ -1206,9 +1114,10 @@ router.post("/api/sessions/cancel", async (ctx: Ctx) => {
     return;
   }
 
-  if (existing.status !== "scheduled") {
+  const nowTs = Date.now();
+  if (new Date(existing.start_at).getTime() <= nowTs) {
     ctx.response.status = 400;
-    ctx.response.body = { message: "only future scheduled sessions can be cancelled" };
+    ctx.response.body = { message: "only future sessions can be cancelled" };
     return;
   }
 
@@ -1219,7 +1128,7 @@ router.post("/api/sessions/cancel", async (ctx: Ctx) => {
   };
 
   await sessionStore.write(next);
-  const status = await store.read(gym);
+  const status = await buildBacklogStatusForGym(gym);
   ctx.response.body = { status, cancelled_session_id: sessionId };
 });
 
@@ -1262,13 +1171,13 @@ router.post("/api/sessions/note", async (ctx: Ctx) => {
 
   try {
     await sessionStore.addNote(gym, b.session_id as string, from, text);
-    const sessions = await sessionStore.listFuture(gym);
+    const sessions = await sessionStore.listBacklog(gym);
     ctx.response.body = { sessions };
   } catch (error) {
     const rawMessage = error instanceof Error ? error.message : "invalid request";
     const allowedMessages = [
       "scheduled session not found",
-      "can only add notes to future scheduled sessions",
+      "cannot add notes to cancelled sessions",
       "text is required",
     ];
     ctx.response.status = allowedMessages.includes(rawMessage) ? 400 : 400;
@@ -1281,35 +1190,7 @@ router.get("/api/healthz", (ctx: Ctx) => {
 });
 
 async function processScheduledSessionsForGym(gym: string): Promise<void> {
-  const sessions = await sessionStore.listAll(gym);
-  const now = new Date();
-  const nowTs = now.getTime();
-
-  for (const session of sessions) {
-    const startTs = new Date(session.start_at).getTime();
-    const endTs = new Date(session.end_at).getTime();
-
-    if (session.status === "scheduled" && startTs <= nowTs) {
-      const sessionNotes = getSessionNotes(session);
-      await store.setPresence(gym, session.name, true, getSelfNoteText(session.name, sessionNotes), {
-        checkoutAtIso: session.end_at,
-        checkedInAtIso: new Date(Math.max(startTs, nowTs)).toISOString(),
-        initialNotes: sessionNotes,
-      });
-      session.status = "checked_in";
-      session.checked_in_at = now.toISOString();
-      session.updated_at = new Date().toISOString();
-      await sessionStore.write(session);
-    }
-
-    if (session.status === "checked_in" && endTs <= nowTs) {
-      await store.setPresence(gym, session.name, false);
-      session.status = "completed";
-      session.checked_out_at = now.toISOString();
-      session.updated_at = new Date().toISOString();
-      await sessionStore.write(session);
-    }
-  }
+  await sessionStore.pruneBacklog(gym);
 }
 
 async function listKnownGyms(): Promise<string[]> {
@@ -1414,7 +1295,6 @@ setInterval(async () => {
     const gyms = await listKnownGyms();
     await Promise.all(gyms.map(async (gym) => {
       await processScheduledSessionsForGym(gym);
-      await store.autoCheckout(gym);
     }));
     await sendTomorrowScheduleReminders();
   } catch (error) {

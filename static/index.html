@@ -872,7 +872,7 @@
       if (savedTheme) setTheme(savedTheme);
       themeToggleEl.addEventListener("click", () => {
         setTheme(getTheme() === "dark" ? "light" : "dark");
-        if (currentStatus) renderPeopleHere(currentStatus);
+        if (currentStatus) renderPeopleHere(currentStatus.sessions || []);
       });
 
       // gym location selection
@@ -1157,12 +1157,87 @@
       const formatStatus = (status) =>
         [
           `gym_name: ${status.gym_name}`,
-          `people_here_count: ${status.people_here.length}`,
-          `scheduled_sessions_count: ${(status.scheduled_sessions || []).length}`,
+          `people_here_count: ${deriveActivePeople(status.sessions || []).length}`,
+          `scheduled_sessions_count: ${deriveUpcomingSessions(status.sessions || []).length}`,
           `last_check_in: ${formatDateTime(status.last_check_in)}`,
           `check_in_count: ${status.check_in_count}`,
           `updated_at: ${formatDateTime(status.updated_at)}`,
         ].join("\n");
+
+      const isSessionActive = (session, now = new Date()) => {
+        const start = new Date(session.start_at).getTime();
+        const end = new Date(session.end_at).getTime();
+        const nowTs = now.getTime();
+        if (Number.isNaN(start) || Number.isNaN(end)) {
+          return false;
+        }
+        return session.status !== "cancelled" && start <= nowTs && nowTs < end;
+      };
+
+      const deriveUpcomingSessions = (sessions, now = new Date()) => {
+        const nowTs = now.getTime();
+        return (sessions || [])
+          .filter((session) => {
+            if (session.status === "cancelled") return false;
+            const start = new Date(session.start_at).getTime();
+            return !Number.isNaN(start) && start > nowTs;
+          })
+          .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+      };
+
+      const deriveActivePeople = (sessions, now = new Date()) => {
+        const byName = new Map();
+        for (const session of sessions || []) {
+          if (!isSessionActive(session, now)) continue;
+          const key = (session.name || "").toLowerCase();
+          const startTs = new Date(session.start_at).getTime();
+          const existing = byName.get(key);
+          if (existing && existing.__startTs > startTs) {
+            continue;
+          }
+          byName.set(key, {
+            session_id: session.id,
+            name: session.name,
+            checked_in_at: session.start_at,
+            checkout_at: session.end_at,
+            notes: session.notes || [],
+            reactions: session.reactions || {},
+            __startTs: startTs,
+          });
+        }
+        return [...byName.values()]
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(({ __startTs, ...person }) => person);
+      };
+
+      const buildNoteInputRow = ({ placeholder, onSend }) => {
+        const noteRow = document.createElement("div");
+        noteRow.className = "note-input-row";
+
+        const noteIn = document.createElement("input");
+        noteIn.type = "text";
+        noteIn.placeholder = placeholder;
+
+        const noteBtn = document.createElement("button");
+        noteBtn.className = "secondary";
+        noteBtn.textContent = "send";
+        noteBtn.addEventListener("click", async () => {
+          const text = noteIn.value.trim();
+          if (!text) return;
+          noteBtn.disabled = true;
+          await onSend(text);
+          noteIn.value = "";
+          noteBtn.disabled = false;
+        });
+
+        noteIn.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") noteBtn.click();
+        });
+
+        noteRow.appendChild(noteIn);
+        noteRow.appendChild(noteBtn);
+        return noteRow;
+      };
 
       const formatSessionWindow = (startAt, endAt) => {
         const startDate = new Date(startAt);
@@ -1258,29 +1333,11 @@
             item.appendChild(notesDiv);
           }
 
-          // note input (named if you entered a name, anonymous otherwise)
           if (session.name) {
-            const noteRow = document.createElement("div");
-            noteRow.className = "note-input-row";
-            const noteIn = document.createElement("input");
-            noteIn.type = "text";
-            noteIn.placeholder = "leave a note (anonymous if name is blank)...";
-            const noteBtn = document.createElement("button");
-            noteBtn.className = "secondary";
-            noteBtn.textContent = "send";
-            noteBtn.addEventListener("click", async () => {
-              const text = noteIn.value.trim();
-              if (!text) return;
-              noteBtn.disabled = true;
-              await sendSessionNote(session.id, text);
-              noteIn.value = "";
-              noteBtn.disabled = false;
+            const noteRow = buildNoteInputRow({
+              placeholder: "leave a note...",
+              onSend: (text) => sendSessionNote(session.id, text),
             });
-            noteIn.addEventListener("keydown", (e) => {
-              if (e.key === "Enter") noteBtn.click();
-            });
-            noteRow.appendChild(noteIn);
-            noteRow.appendChild(noteBtn);
             item.appendChild(noteRow);
           }
 
@@ -1319,9 +1376,10 @@
         }
       }
 
-      const renderPeopleHere = (status) => {
+      const renderPeopleHere = (sessions) => {
         peopleHereEl.innerHTML = "";
-        const hasPeopleHere = status.people_here.length > 0;
+        const activePeople = deriveActivePeople(sessions || []);
+        const hasPeopleHere = activePeople.length > 0;
         peopleHereTitleEl.hidden = !hasPeopleHere;
         peopleHereEl.hidden = !hasPeopleHere;
         if (!hasPeopleHere) {
@@ -1330,7 +1388,7 @@
         const pastelColors = ["#f9a8d4", "#a5b4fc", "#86efac", "#fde68a", "#c4b5fd", "#93c5fd", "#fca5a5", "#5eead4"];
         const myName = normalizeName(nameInputEl.value);
 
-        for (const person of status.people_here) {
+        for (const person of activePeople) {
           const itemEl = document.createElement("li");
           itemEl.className = "person";
 
@@ -1429,29 +1487,11 @@
 
           itemEl.appendChild(reactionsDiv);
 
-          // note input (named if you entered a name, anonymous otherwise)
-          if (person.name) {
-            const noteRow = document.createElement("div");
-            noteRow.className = "note-input-row";
-            const noteIn = document.createElement("input");
-            noteIn.type = "text";
-            noteIn.placeholder = "leave a note";
-            const noteBtn = document.createElement("button");
-            noteBtn.className = "secondary";
-            noteBtn.textContent = "send";
-            noteBtn.addEventListener("click", async () => {
-              const text = noteIn.value.trim();
-              if (!text) return;
-              noteBtn.disabled = true;
-              await sendNote(person.name, text);
-              noteIn.value = "";
-              noteBtn.disabled = false;
+          if (person.name && person.session_id) {
+            const noteRow = buildNoteInputRow({
+              placeholder: "leave a note",
+              onSend: (text) => sendSessionNote(person.session_id, text),
             });
-            noteIn.addEventListener("keydown", (e) => {
-              if (e.key === "Enter") noteBtn.click();
-            });
-            noteRow.appendChild(noteIn);
-            noteRow.appendChild(noteBtn);
             itemEl.appendChild(noteRow);
           }
 
@@ -1495,14 +1535,17 @@
           const payload = await response.json();
           currentStatus = payload.status;
           statusEl.textContent = formatStatus(payload.status);
-          renderPeopleHere(payload.status);
-          renderScheduledSessions(payload.status.scheduled_sessions || []);
+          const allSessions = payload.status.sessions || [];
+          renderPeopleHere(allSessions);
+          renderScheduledSessions(deriveUpcomingSessions(allSessions));
 
-          if (payload.scheduled_session && payload.scheduled_session.status === "scheduled") {
-            messageEl.textContent = `${name} scheduled a future climbing session`;
-          } else {
+          const createdSession = payload.scheduled_session;
+          const createdIsActive = Boolean(createdSession && isSessionActive(createdSession));
+          if (createdIsActive) {
             messageEl.textContent = `${name} is now at ${gym}`;
             celebrateCheckIn();
+          } else {
+            messageEl.textContent = `${name} scheduled a future climbing session`;
           }
           noteInputEl.value = "";
         } catch (error) {
@@ -1523,8 +1566,9 @@
           const status = await response.json();
           currentStatus = status;
           statusEl.textContent = formatStatus(status);
-          renderPeopleHere(status);
-          renderScheduledSessions(status.scheduled_sessions || []);
+          const allSessions = status.sessions || [];
+          renderPeopleHere(allSessions);
+          renderScheduledSessions(deriveUpcomingSessions(allSessions));
           if (!messageEl.textContent) {
             messageEl.textContent = "";
           }
@@ -1611,29 +1655,6 @@
         }
       }
 
-      async function sendNote(targetName, text) {
-        const myName = normalizeName(nameInputEl.value);
-        try {
-          const gym = getSelectedGym();
-          const response = await fetch("/api/note", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ gym, ...(myName ? { from: myName } : {}), target: targetName, text }),
-          });
-          if (!response.ok) {
-            const errorBody = await response.json().catch(() => ({ message: "note failed" }));
-            throw new Error(errorBody.message || "note failed");
-          }
-          await loadStatus();
-        } catch (error) {
-          if (error instanceof TypeError) {
-            messageEl.textContent = "could not reach server. make sure deno task start is running, then refresh.";
-            return;
-          }
-          messageEl.textContent = error instanceof Error ? error.message : "note failed";
-        }
-      }
-
       async function sendSessionNote(sessionId, text) {
         const myName = normalizeName(nameInputEl.value);
         try {
@@ -1666,7 +1687,9 @@
         }
         updateNotifButton();
         if (currentStatus) {
-          renderScheduledSessions(currentStatus.scheduled_sessions || []);
+          const allSessions = currentStatus.sessions || [];
+          renderScheduledSessions(deriveUpcomingSessions(allSessions));
+          renderPeopleHere(allSessions);
         }
         if (pushSubscription && value) {
           const gym = getSelectedGym();
